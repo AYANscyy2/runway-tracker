@@ -1,0 +1,32 @@
+{
+  "name": "runway-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node scripts/migrate.mjs",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "next": "16.2.9",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "drizzle-orm": "0.45.2",
+    "postgres": "3.4.9"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.7",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.0.3",
+    "drizzle-kit": "0.31.10",
+    "dotenv": "16.4.7",
+    "typescript": "5.7.3",
+    "tailwindcss": "3.4.17",
+    "postcss": "8.5.15",
+    "autoprefixer": "10.4.20"
+  }
+}
