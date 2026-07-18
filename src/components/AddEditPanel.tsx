@@ -2,30 +2,34 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { STATUS_LABEL, STATUS_ORDER, TYPE_LABEL } from "@/lib/constants";
-import type { Opportunity, NewOpportunity } from "@/db/schema";
-import { createOpportunity, updateOpportunity } from "@/app/actions";
+import type { Opportunity, NewOpportunity, OpportunityWithUrls } from "@/db/schema";
+import { createOpportunity, updateOpportunity, type OpportunityInput } from "@/app/actions";
 
 type FormState = {
   type: Opportunity["type"];
   name: string;
   source: string;
-  link: string;
+  urls: { label: string; url: string }[];
   deadline: string;
   status: Opportunity["status"];
   referralContact: string;
+  foundDate: string;
+  followUpDate: string;
   nextAction: string;
   notes: string;
 };
 
-function toFormState(o?: Opportunity | null): FormState {
+function toFormState(o?: OpportunityWithUrls | null): FormState {
   return {
     type: o?.type ?? "job",
     name: o?.name ?? "",
     source: o?.source ?? "",
-    link: o?.link ?? "",
+    urls: o?.urls?.length ? [...o.urls] : [{ label: "", url: "" }],
     deadline: o?.deadline ? String(o.deadline).slice(0, 10) : "",
     status: o?.status ?? "found",
     referralContact: o?.referralContact ?? "",
+    foundDate: o?.foundDate ? String(o.foundDate).slice(0, 10) : new Date().toISOString().slice(0, 10),
+    followUpDate: o?.followUpDate ? String(o.followUpDate).slice(0, 10) : "",
     nextAction: o?.nextAction ?? "",
     notes: o?.notes ?? "",
   };
@@ -35,7 +39,7 @@ export function AddEditPanel({
   editing,
   onClose,
 }: {
-  editing: Opportunity | null | "new";
+  editing: OpportunityWithUrls | null | "new";
   onClose: () => void;
 }) {
   const [form, setForm] = useState<FormState>(() =>
@@ -62,14 +66,28 @@ export function AddEditPanel({
     e.preventDefault();
     if (!form.name.trim()) return;
 
-    const payload: NewOpportunity = {
+    const validUrls = form.urls.filter((u) => u.label.trim() || u.url.trim());
+    for (const u of validUrls) {
+      if (u.url.trim() && !/^https?:\/\//i.test(u.url.trim())) {
+        alert(`URL for "${u.label || "link"}" must start with http:// or https://`);
+        return;
+      }
+      if (u.url.trim() && !u.label.trim()) {
+        alert("Please provide a label for the URL: " + u.url);
+        return;
+      }
+    }
+
+    const payload: OpportunityInput = {
       type: form.type,
       name: form.name.trim(),
       source: form.source.trim() || null,
-      link: form.link.trim() || null,
+      urls: validUrls.map((u) => ({ label: u.label.trim(), url: u.url.trim() })),
       deadline: form.deadline || null,
       status: form.status,
       referralContact: form.referralContact.trim() || null,
+      foundDate: form.foundDate || null,
+      followUpDate: form.followUpDate || null,
       nextAction: form.nextAction.trim() || null,
       notes: form.notes.trim() || null,
     };
@@ -86,23 +104,23 @@ export function AddEditPanel({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <form
         onSubmit={handleSubmit}
-        className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-y-auto rounded-lg border border-border bg-surface p-6"
+        className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-y-auto rounded-lg border-2 border-border bg-bg-card p-6 shadow-hard-3"
       >
         <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-ink">
+          <h2 className="text-base font-extrabold text-ink">
             {isEdit ? "Edit entry" : "Log a new opportunity"}
           </h2>
           <button
             type="button"
             onClick={onClose}
-            className="text-ink-muted hover:text-ink"
+            className="flex h-7 w-7 items-center justify-center rounded border-2 border-border bg-surface font-bold text-ink-muted hover:bg-surface-2 hover:text-ink"
             aria-label="Close"
           >
             ✕
@@ -116,10 +134,10 @@ export function AddEditPanel({
                 key={t}
                 type="button"
                 onClick={() => field("type", t)}
-                className={`flex-1 rounded-sm border px-3 py-2 text-sm transition-colors ${
+                className={`flex-1 rounded border-2 border-border px-3 py-2 text-sm font-bold transition-colors ${
                   form.type === t
-                    ? "border-amber bg-amber-soft text-amber"
-                    : "border-border text-ink-muted hover:text-ink"
+                    ? "bg-primary text-white shadow-hard-1"
+                    : "bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink"
                 }`}
               >
                 {TYPE_LABEL[t]}
@@ -137,7 +155,7 @@ export function AddEditPanel({
               value={form.name}
               onChange={(e) => field("name", e.target.value)}
               placeholder={form.type === "job" ? "e.g. Razorpay" : "e.g. HackIndia Spark"}
-              className="rounded-sm border border-border bg-surface-2 px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-muted/60"
+              className="rounded border-2 border-border bg-bg-card px-3 py-2 text-sm font-medium text-ink shadow-hard-1 outline-none placeholder:text-ink-faint focus:bg-primary-soft"
             />
           </label>
 
@@ -145,11 +163,20 @@ export function AddEditPanel({
             <label className="flex flex-col gap-1">
               <span className="text-xs text-ink-muted">Source</span>
               <input
+                list="source-options"
                 value={form.source}
                 onChange={(e) => field("source", e.target.value)}
                 placeholder="LinkedIn, Devfolio…"
-                className="rounded-sm border border-border bg-surface-2 px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-muted/60"
+                className="rounded border-2 border-border bg-bg-card px-3 py-2 text-sm font-medium text-ink shadow-hard-1 outline-none placeholder:text-ink-faint focus:bg-primary-soft"
               />
+              <datalist id="source-options">
+                <option value="LinkedIn" />
+                <option value="Unstop" />
+                <option value="Naukri" />
+                <option value="Referral" />
+                <option value="Cold email" />
+                <option value="Other" />
+              </datalist>
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-xs text-ink-muted">Deadline</span>
@@ -157,20 +184,63 @@ export function AddEditPanel({
                 type="date"
                 value={form.deadline}
                 onChange={(e) => field("deadline", e.target.value)}
-                className="rounded-sm border border-border bg-surface-2 px-3 py-2 text-sm text-ink outline-none [color-scheme:dark]"
+                className="rounded border-2 border-border bg-bg-card px-3 py-2 text-sm font-medium text-ink shadow-hard-1 outline-none focus:bg-primary-soft"
               />
             </label>
           </div>
 
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-ink-muted">Link</span>
-            <input
-              value={form.link}
-              onChange={(e) => field("link", e.target.value)}
-              placeholder="https://…"
-              className="rounded-sm border border-border bg-surface-2 px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-muted/60"
-            />
-          </label>
+          <div className="flex flex-col gap-2">
+            <span className="text-xs text-ink-muted">Links</span>
+            {form.urls.map((u, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input
+                  list="url-label-options"
+                  value={u.label}
+                  onChange={(e) => {
+                    const newUrls = [...form.urls];
+                    newUrls[i].label = e.target.value;
+                    field("urls", newUrls);
+                  }}
+                  placeholder="e.g. Job Posting"
+                  className="w-[30%] rounded border-2 border-border bg-bg-card px-2 py-1.5 text-sm font-medium text-ink outline-none placeholder:text-ink-faint focus:bg-primary-soft"
+                />
+                <input
+                  value={u.url}
+                  onChange={(e) => {
+                    const newUrls = [...form.urls];
+                    newUrls[i].url = e.target.value;
+                    field("urls", newUrls);
+                  }}
+                  placeholder="https://..."
+                  className="w-[60%] flex-1 rounded border-2 border-border bg-bg-card px-2 py-1.5 text-sm font-medium text-ink outline-none placeholder:text-ink-faint focus:bg-primary-soft"
+                />
+                <button
+                  type="button"
+                  onClick={() => field("urls", form.urls.filter((_, idx) => idx !== i))}
+                  className="flex h-8 w-8 items-center justify-center rounded border-2 border-danger bg-danger-soft font-bold text-danger hover:bg-danger/20"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => field("urls", [...form.urls, { label: "", url: "" }])}
+              className="self-start text-xs font-bold text-primary hover:underline"
+            >
+              + Add URL
+            </button>
+            <datalist id="url-label-options">
+              <option value="Job Posting" />
+              <option value="Application Portal" />
+              <option value="Company Careers" />
+              <option value="Referral Profile" />
+              <option value="Glassdoor" />
+              <option value="GitHub" />
+              <option value="Notion / Doc" />
+              <option value="Other" />
+            </datalist>
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
             <label className="flex flex-col gap-1">
@@ -178,7 +248,7 @@ export function AddEditPanel({
               <select
                 value={form.status}
                 onChange={(e) => field("status", e.target.value as Opportunity["status"])}
-                className="rounded-sm border border-border bg-surface-2 px-3 py-2 text-sm text-ink outline-none"
+                className="rounded border-2 border-border bg-bg-card px-3 py-2 text-sm font-medium text-ink shadow-hard-1 outline-none"
               >
                 {STATUS_ORDER.map((s) => (
                   <option key={s} value={s}>
@@ -193,7 +263,28 @@ export function AddEditPanel({
                 value={form.referralContact}
                 onChange={(e) => field("referralContact", e.target.value)}
                 placeholder="optional"
-                className="rounded-sm border border-border bg-surface-2 px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-muted/60"
+                className="rounded border-2 border-border bg-bg-card px-3 py-2 text-sm font-medium text-ink shadow-hard-1 outline-none placeholder:text-ink-faint focus:bg-primary-soft"
+              />
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-ink-muted">Found date</span>
+              <input
+                type="date"
+                value={form.foundDate}
+                onChange={(e) => field("foundDate", e.target.value)}
+                className="rounded border-2 border-border bg-bg-card px-3 py-2 text-sm font-medium text-ink shadow-hard-1 outline-none focus:bg-primary-soft"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-ink-muted">Follow-up date</span>
+              <input
+                type="date"
+                value={form.followUpDate}
+                onChange={(e) => field("followUpDate", e.target.value)}
+                className="rounded border-2 border-border bg-bg-card px-3 py-2 text-sm font-medium text-ink shadow-hard-1 outline-none focus:bg-primary-soft"
               />
             </label>
           </div>
@@ -204,7 +295,7 @@ export function AddEditPanel({
               value={form.nextAction}
               onChange={(e) => field("nextAction", e.target.value)}
               placeholder="What you need to do next"
-              className="rounded-sm border border-border bg-surface-2 px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-muted/60"
+              className="rounded border-2 border-border bg-bg-card px-3 py-2 text-sm font-medium text-ink shadow-hard-1 outline-none placeholder:text-ink-faint focus:bg-primary-soft"
             />
           </label>
 
@@ -214,7 +305,7 @@ export function AddEditPanel({
               value={form.notes}
               onChange={(e) => field("notes", e.target.value)}
               rows={3}
-              className="resize-none rounded-sm border border-border bg-surface-2 px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-muted/60"
+              className="resize-none rounded border-2 border-border bg-bg-card px-3 py-2 text-sm font-medium text-ink shadow-hard-1 outline-none placeholder:text-ink-faint focus:bg-primary-soft"
             />
           </label>
         </div>
@@ -223,14 +314,14 @@ export function AddEditPanel({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-sm border border-border px-4 py-2 text-sm text-ink-muted hover:text-ink"
+            className="rounded border-2 border-border bg-surface px-4 py-2 text-sm font-bold text-ink-muted shadow-hard-1 btn-push-sm hover:text-ink"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={isPending}
-            className="rounded-sm bg-amber px-4 py-2 text-sm font-medium text-bg disabled:opacity-60"
+            className="rounded border-2 border-border bg-primary px-5 py-2 text-sm font-bold text-white shadow-hard-1 btn-push disabled:opacity-60"
           >
             {isPending ? "Saving…" : isEdit ? "Save changes" : "Add to tracker"}
           </button>

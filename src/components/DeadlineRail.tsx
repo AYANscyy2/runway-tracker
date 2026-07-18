@@ -15,14 +15,14 @@ export function DeadlineRail({ items }: { items: Opportunity[] }) {
   if (upcoming.length === 0) return null;
 
   return (
-    <div className="rounded-md border border-amber/30 bg-amber-soft p-4">
-      <p className="mb-3 text-xs font-medium uppercase tracking-wide text-amber">
-        Next 7 days — don&apos;t let these slip
+    <div className="rounded-lg border-2 border-border bg-tertiary-soft p-4 shadow-hard-1-muted backdrop-blur-sm">
+      <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-tertiary">
+        ⏰ Next 7 days — don&apos;t let these slip
       </p>
-      <ul className="flex flex-col gap-2">
+      <ul className="flex flex-col divide-y-2 divide-border/20">
         {upcoming.map((item) => (
-          <li key={item.id} className="flex items-center justify-between gap-3 text-sm">
-            <span className="truncate text-ink">{item.name}</span>
+          <li key={item.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+            <span className="truncate font-bold text-ink">{item.name}</span>
             <DeadlineStamp deadline={item.deadline} isTerminal={false} />
           </li>
         ))}

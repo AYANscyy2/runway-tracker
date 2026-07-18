@@ -1,17 +1,105 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,700;0,9..40,800;1,9..40,400&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
-  body {
-    background-color: theme("colors.bg");
-    color: theme("colors.ink");
+  :root {
+    --color-bg: #fcf9f8;
+    --color-bg-card: #ffffff;
+    --color-surface: #f6f1ef;
+    --color-surface-2: #ece5e3;
+    --color-border: #1a1a1a;
+    --color-border-muted: #e0bfbd;
+    --color-ink: #1c1b1b;
+    --color-ink-muted: #584140;
+    --color-ink-faint: #8c706f;
+    --color-primary: #ae2f34;
+    --color-primary-container: #ff6b6b;
+    --color-primary-soft: rgba(174, 47, 52, 0.1);
+    --color-secondary: #006a65;
+    --color-secondary-container: #79f3ea;
+    --color-secondary-soft: rgba(0, 106, 101, 0.1);
+    --color-tertiary: #6d5e00;
+    --color-tertiary-container: #c1ab38;
+    --color-tertiary-soft: rgba(109, 94, 0, 0.1);
+    --color-danger: #ba1a1a;
+    --color-danger-soft: rgba(186, 26, 26, 0.14);
+    --color-success: #006a65;
+    --color-success-soft: rgba(0, 106, 101, 0.14);
+    --color-status-found: #f5c84b;
+    --color-status-applied: #4ab3f4;
+    --color-status-oa-assignment: #f5a523;
+    --color-status-in-progress: #b07aff;
+    --color-status-selected: #3dba78;
+    --color-status-rejected: #ff5c5c;
+    --color-status-hackathon-active: #4ecdc4;
+    color-scheme: light;
   }
 
-  /* Visible keyboard focus everywhere — not just on mouse hover. */
+  html[data-theme="dark"] {
+    --color-bg: #0d0404;
+    --color-bg-card: #1c0a0b;
+    --color-surface: #261011;
+    --color-surface-2: #36181a;
+    --color-border: #ae2f34;
+    --color-border-muted: rgba(174, 47, 52, 0.3);
+    --color-ink: #f3eaea;
+    --color-ink-muted: #b89494;
+    --color-ink-faint: #8c6f6f;
+    --color-primary: #ae2f34;
+    --color-primary-container: #ff6b6b;
+    --color-primary-soft: rgba(174, 47, 52, 0.22);
+    --color-secondary: #5cbdff;
+    --color-secondary-container: #96d9ff;
+    --color-secondary-soft: rgba(92, 189, 255, 0.18);
+    --color-tertiary: #f5c84b;
+    --color-tertiary-container: #ffdd66;
+    --color-tertiary-soft: rgba(245, 200, 75, 0.2);
+    --color-danger: #ff6b6b;
+    --color-danger-soft: rgba(255, 107, 107, 0.24);
+    --color-success: #57d0c6;
+    --color-success-soft: rgba(87, 208, 198, 0.2);
+    --color-status-found: #786638;
+    --color-status-applied: #3d6580;
+    --color-status-oa-assignment: #826430;
+    --color-status-in-progress: #6a4f85;
+    --color-status-selected: #3f8a66;
+    --color-status-rejected: #8a4040;
+    --color-status-hackathon-active: #3d7a72;
+    color-scheme: dark;
+    background-image:
+      radial-gradient(circle at 15% 10%, rgba(174, 47, 52, 0.2), transparent 35%),
+      radial-gradient(circle at 85% 85%, rgba(174, 47, 52, 0.12), transparent 40%),
+      radial-gradient(circle at 50% 50%, rgba(174, 47, 52, 0.06), transparent 60%);
+  }
+
+  html {
+    background-color: var(--color-bg);
+    color: var(--color-ink);
+    transition: background-color 180ms ease, color 180ms ease;
+  }
+
+  body {
+    min-height: 100vh;
+    background: var(--color-bg);
+    color: var(--color-ink);
+    background-image: inherit;
+    background-size: cover;
+    background-attachment: fixed;
+    font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+    font-weight: 500;
+    text-rendering: optimizeLegibility;
+  }
+
   :focus-visible {
-    outline: 2px solid theme("colors.amber.DEFAULT");
+    outline: 2px solid var(--color-primary);
     outline-offset: 2px;
+  }
+
+  input[type="date"] {
+    color-scheme: light;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -22,5 +110,44 @@
       animation-iteration-count: 1 !important;
       transition-duration: 0.001ms !important;
     }
+  }
+}
+
+@layer utilities {
+  /* Brutalist push — button presses toward its own shadow */
+  .btn-push {
+    transition: transform 0.08s ease, box-shadow 0.08s ease;
+  }
+  .btn-push:hover {
+    transform: translate(2px, 2px);
+    box-shadow: 1px 1px 0 0 var(--color-border);
+  }
+  .btn-push:active {
+    transform: translate(3px, 3px);
+    box-shadow: none;
+  }
+
+  .btn-push-sm {
+    transition: transform 0.08s ease, box-shadow 0.08s ease;
+  }
+  .btn-push-sm:hover {
+    transform: translate(1px, 1px);
+    box-shadow: 2px 2px 0 0 var(--color-border);
+  }
+  .btn-push-sm:active {
+    transform: translate(3px, 3px);
+    box-shadow: none;
+  }
+
+  .text-contrast-high {
+    color: var(--color-ink) !important;
+  }
+
+  .bg-card-strong {
+    background-color: var(--color-bg-card) !important;
+  }
+
+  .border-contrast {
+    border-color: var(--color-border) !important;
   }
 }

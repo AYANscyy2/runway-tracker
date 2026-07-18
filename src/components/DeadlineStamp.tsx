@@ -1,11 +1,11 @@
 import { countdownLabel, formatDeadline, urgencyFor, type Urgency } from "@/lib/dates";
 
 const URGENCY_CLASSES: Record<Urgency, string> = {
-  none: "border-border text-ink-muted",
-  ok: "border-border text-ink-muted",
-  soon: "border-amber/40 text-amber",
-  urgent: "border-amber text-amber bg-amber-soft",
-  overdue: "border-danger text-danger bg-danger-soft",
+  none:    "text-ink-muted",
+  ok:      "text-ink-muted",
+  soon:    "font-bold text-tertiary",
+  urgent:  "font-bold text-danger",
+  overdue: "text-ink-faint line-through",
 };
 
 export function DeadlineStamp({
@@ -18,11 +18,17 @@ export function DeadlineStamp({
   const urgency = urgencyFor(deadline, isTerminal);
 
   return (
-    <div className="inline-flex flex-col items-start gap-0.5">
-      <span className="font-mono text-xs text-ink-muted">{formatDeadline(deadline)}</span>
-      {deadline && (
+    <div className="inline-flex items-center gap-1">
+      <span className={`text-xs ${URGENCY_CLASSES[urgency]}`}>
+        {formatDeadline(deadline)}
+      </span>
+      {urgency === "urgent" && (
+        <span className="text-[10px] text-danger" title="Action required soon">⚑</span>
+      )}
+      {urgency === "soon" && (
         <span
-          className={`rounded-sm border px-1.5 py-0.5 font-mono text-[11px] leading-none ${URGENCY_CLASSES[urgency]}`}
+          className="rounded border border-tertiary bg-tertiary-soft px-1 py-px text-[9px] font-bold text-ink"
+          title={countdownLabel(deadline) ?? ""}
         >
           {countdownLabel(deadline)}
         </span>

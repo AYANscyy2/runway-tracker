@@ -17,7 +17,7 @@ export function daysUntil(deadline: string | Date | null): number | null {
 }
 
 export function formatDeadline(deadline: string | Date | null): string {
-  if (!deadline) return "No deadline";
+  if (!deadline) return "—";
   return toCalendarDate(deadline).toLocaleDateString("en-IN", {
     day: "numeric",
     month: "short",

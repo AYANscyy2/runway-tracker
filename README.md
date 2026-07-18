@@ -27,7 +27,7 @@ Any standard Postgres connection string works. The fastest free option:
 
 Supabase or Railway work the same way if you'd rather use those.
 
-## 2. Set up the project
+## 2. Set up the 
 
 ```bash
 npm install
