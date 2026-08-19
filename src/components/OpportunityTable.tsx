@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import type { Opportunity, OpportunityWithUrls } from "@/db/schema";
+import type { OpportunityWithUrls } from "@/db/schema";
 import { TERMINAL_STATUSES, TYPE_LABEL } from "@/lib/constants";
 import { DeadlineStamp } from "./DeadlineStamp";
 import { StatusSelect } from "./StatusSelect";
@@ -53,7 +53,7 @@ export function OpportunityTable({
     );
   }
 
-  function handleStatusChange(item: Opportunity, status: Opportunity["status"]) {
+  function handleStatusChange(item: OpportunityWithUrls, status: OpportunityWithUrls["status"]) {
     startTransition(async () => {
       await updateOpportunity(item.id, { status });
     });

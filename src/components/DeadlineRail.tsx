@@ -1,9 +1,9 @@
 import { daysUntil } from "@/lib/dates";
 import { TERMINAL_STATUSES } from "@/lib/constants";
-import type { Opportunity } from "@/db/schema";
+import type { OpportunityWithUrls } from "@/db/schema";
 import { DeadlineStamp } from "./DeadlineStamp";
 
-export function DeadlineRail({ items }: { items: Opportunity[] }) {
+export function DeadlineRail({ items }: { items: OpportunityWithUrls[] }) {
   const upcoming = items
     .filter((i) => i.deadline && !TERMINAL_STATUSES.includes(i.status))
     .filter((i) => {

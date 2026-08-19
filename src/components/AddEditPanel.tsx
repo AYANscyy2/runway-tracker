@@ -2,16 +2,16 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { STATUS_LABEL, STATUS_ORDER, TYPE_LABEL } from "@/lib/constants";
-import type { Opportunity, NewOpportunity, OpportunityWithUrls } from "@/db/schema";
+import type { OpportunityWithUrls } from "@/db/schema";
 import { createOpportunity, updateOpportunity, type OpportunityInput } from "@/app/actions";
 
 type FormState = {
-  type: Opportunity["type"];
+  type: OpportunityWithUrls["type"];
   name: string;
   source: string;
   urls: { label: string; url: string }[];
   deadline: string;
-  status: Opportunity["status"];
+  status: OpportunityWithUrls["status"];
   referralContact: string;
   foundDate: string;
   followUpDate: string;
@@ -247,7 +247,7 @@ export function AddEditPanel({
               <span className="text-xs text-ink-muted">Status</span>
               <select
                 value={form.status}
-                onChange={(e) => field("status", e.target.value as Opportunity["status"])}
+                onChange={(e) => field("status", e.target.value as OpportunityWithUrls["status"])}
                 className="rounded border-2 border-border bg-bg-card px-3 py-2 text-sm font-medium text-ink shadow-hard-1 outline-none"
               >
                 {STATUS_ORDER.map((s) => (

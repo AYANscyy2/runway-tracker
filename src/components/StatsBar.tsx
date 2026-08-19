@@ -17,47 +17,55 @@ export function StatsBar({ items }: { items: OpportunityWithUrls[] }) {
   }).length;
 
   return (
-    <div className="flex flex-col gap-3">
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap">
-        {STAT_STATUSES.map((status) => {
-          const count = items.filter((i) => i.status === status).length;
-          return (
-            <div
-              key={status}
-              style={{ backgroundColor: STATUS_COLOR[status] }}
-              className="flex min-w-[110px] flex-1 flex-col gap-1 rounded-2xl border-2 border-border bg-opacity-90 p-4 shadow-hard-2"
-            >
-              <p className="text-[10px] font-bold uppercase tracking-widest text-ink/70">
-                {STATUS_LABEL[status]}
-              </p>
-              <p className="text-4xl font-extrabold leading-none tracking-tighter text-ink">
-                {count}
-              </p>
-            </div>
-          );
-        })}
-      </div>
+    <details className="group flex flex-col gap-3 rounded-2xl border-2 border-border bg-bg-card p-4 shadow-hard-2">
+      <summary className="flex cursor-pointer list-none select-none items-center justify-between font-bold text-ink-muted hover:text-ink [&::-webkit-details-marker]:hidden">
+        <span>Application Statistics</span>
+        <span className="text-sm font-bold tracking-wider group-open:hidden">+ SHOW</span>
+        <span className="hidden text-sm font-bold tracking-wider group-open:block">- HIDE</span>
+      </summary>
 
-      {/* Response rate + stale */}
-      <div className="flex flex-wrap items-center gap-3 text-xs font-bold">
-        <div className="rounded border-2 border-border bg-bg-card px-3 py-1.5 shadow-hard-1-muted">
-          <span className="text-ink-muted">Response rate: </span>
-          <span className="text-ink">
-            {totalResponses}/{totalApplied} ({Math.round(responseRate)}%)
-          </span>
+      <div className="mt-4 flex flex-col gap-3">
+        {/* Stat cards */}
+        <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap">
+          {STAT_STATUSES.map((status) => {
+            const count = items.filter((i) => i.status === status).length;
+            return (
+              <div
+                key={status}
+                style={{ backgroundColor: STATUS_COLOR[status] }}
+                className="flex min-w-[110px] flex-1 flex-col gap-1 rounded-2xl border-2 border-border bg-opacity-90 p-4 shadow-hard-2"
+              >
+                <p className="text-[10px] font-bold uppercase tracking-widest text-ink/70">
+                  {STATUS_LABEL[status]}
+                </p>
+                <p className="text-4xl font-extrabold leading-none tracking-tighter text-ink">
+                  {count}
+                </p>
+              </div>
+            );
+          })}
         </div>
-        {staleCount > 0 && (
-          <div className="rounded border-2 border-danger bg-danger-soft px-3 py-1.5 text-danger shadow-hard-1-muted">
-            ⚠ {staleCount} stale — no update in 14+ days
+
+        {/* Response rate + stale */}
+        <div className="flex flex-wrap items-center gap-3 text-xs font-bold">
+          <div className="rounded border-2 border-border bg-bg-card px-3 py-1.5 shadow-hard-1-muted">
+            <span className="text-ink-muted">Response rate: </span>
+            <span className="text-ink">
+              {totalResponses}/{totalApplied} ({Math.round(responseRate)}%)
+            </span>
           </div>
-        )}
-        {totalApplied > 10 && responseRate < 20 && (
-          <div className="rounded border-2 border-tertiary bg-tertiary-soft px-3 py-1.5 text-ink shadow-hard-1-muted">
-            💡 Low response rate — try tailoring your resume per application
-          </div>
-        )}
+          {staleCount > 0 && (
+            <div className="rounded border-2 border-danger bg-danger-soft px-3 py-1.5 text-danger shadow-hard-1-muted">
+              ⚠ {staleCount} stale — no update in 14+ days
+            </div>
+          )}
+          {totalApplied > 10 && responseRate < 20 && (
+            <div className="rounded border-2 border-tertiary bg-tertiary-soft px-3 py-1.5 text-ink shadow-hard-1-muted">
+              💡 Low response rate — try tailoring your resume per application
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </details>
   );
 }

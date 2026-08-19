@@ -1,33 +1,39 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Opportunity, OpportunityWithUrls } from "@/db/schema";
+import type { OpportunityWithUrls } from "@/db/schema";
 import { STATUS_LABEL, STATUS_ORDER } from "@/lib/constants";
 import { daysUntil } from "@/lib/dates";
 import { StatsBar } from "./StatsBar";
 import { DeadlineRail } from "./DeadlineRail";
 import { OpportunityTable } from "./OpportunityTable";
 import { AddEditPanel } from "./AddEditPanel";
-
+import AuthButton from "./AuthButton";
+import { CalendarView } from "./CalendarView";
+import { NotificationsView } from "./NotificationsView";
+import { StatisticsView } from "./StatisticsView";
+import { SettingsView } from "./SettingsView";
 type TypeFilter = "all" | "job" | "hackathon";
 
 const NAV = [
-  { icon: "▦", label: "Tracker",    active: true },
-  { icon: "▭", label: "Calendar",   active: false },
-  { icon: "≡", label: "Statistics", active: false },
-  { icon: "⚙", label: "Settings",   active: false },
+  { icon: "▦", label: "Tracker" },
+  { icon: "▭", label: "Calendar" },
+  { icon: <svg width="1.2em" height="1.2em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square" strokeLinejoin="miter" className="inline-block"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>, label: "Notifications" },
+  { icon: "≡", label: "Statistics" },
+  { icon: "⚙", label: "Settings" },
 ] as const;
 
 export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] }) {
   const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [typeFilter, setTypeFilter]       = useState<TypeFilter>("all");
-  const [statusFilter, setStatusFilter]   = useState<"all" | Opportunity["status"]>("all");
-  const [searchQuery, setSearchQuery]     = useState("");
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | OpportunityWithUrls["status"]>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [showStaleOnly, setShowStaleOnly] = useState(false);
-  const [dismissStale, setDismissStale]   = useState(false);
+  const [dismissStale, setDismissStale] = useState(false);
   const [dismissReview, setDismissReview] = useState(false);
-  const [panel, setPanel]                 = useState<OpportunityWithUrls | "new" | null>(null);
-  const [sidebarOpen, setSidebarOpen]     = useState(true);
+  const [panel, setPanel] = useState<OpportunityWithUrls | "new" | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activeTab, setActiveTab] = useState("Tracker");
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("runway-theme") as "light" | "dark" | null;
@@ -68,15 +74,14 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
         if (db === null) return -1;
         return da - db;
       }),
-  [initialData, typeFilter, statusFilter, searchQuery, showStaleOnly, staleItems]);
+    [initialData, typeFilter, statusFilter, searchQuery, showStaleOnly, staleItems]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg">
       {/* ─── Sidebar ─── */}
       <aside
-        className={`relative flex shrink-0 flex-col border-r-2 border-border bg-surface transition-all duration-200 ease-in-out ${
-          sidebarOpen ? "w-44" : "w-14"
-        }`}
+        className={`relative flex shrink-0 flex-col border-r-2 border-border bg-surface transition-all duration-200 ease-in-out ${sidebarOpen ? "w-44" : "w-14"
+          }`}
       >
         {/* Toggle button — sits on the border edge */}
         <button
@@ -106,28 +111,26 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
           <button
             onClick={() => setPanel("new")}
             title="Log opportunity"
-            className={`mb-6 rounded border-2 border-border bg-primary font-bold text-white shadow-hard-1 btn-push ${
-              sidebarOpen
-                ? "w-full px-3 py-2 text-sm"
-                : "flex h-8 w-8 items-center justify-center text-base"
-            }`}
+            className={`mb-6 rounded border-2 border-border bg-primary font-bold text-white shadow-hard-1 btn-push ${sidebarOpen
+              ? "w-full px-3 py-2 text-sm"
+              : "flex h-8 w-8 items-center justify-center text-base"
+              }`}
           >
             {sidebarOpen ? "+ Log opportunity" : "+"}
           </button>
 
           {/* Nav */}
           <nav className="flex w-full flex-col gap-1">
-            {NAV.map(({ icon, label, active }) => (
+            {NAV.map(({ icon, label }) => (
               <button
                 key={label}
+                onClick={() => setActiveTab(label)}
                 title={!sidebarOpen ? label : undefined}
-                className={`flex items-center rounded font-bold transition-colors ${
-                  sidebarOpen ? "gap-2.5 px-3 py-2 text-sm" : "justify-center px-0 py-2 text-base w-full"
-                } ${
-                  active
+                className={`flex items-center rounded font-bold transition-colors ${sidebarOpen ? "gap-2.5 px-3 py-2 text-sm" : "justify-center px-0 py-2 text-base w-full"
+                  } ${activeTab === label
                     ? "border-2 border-border bg-primary text-white shadow-hard-1"
                     : "text-ink-muted hover:bg-surface-2 hover:text-ink"
-                }`}
+                  }`}
               >
                 <span className={sidebarOpen ? "text-xs opacity-70" : ""}>{icon}</span>
                 {sidebarOpen && label}
@@ -139,7 +142,8 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
 
       {/* ─── Main ─── */}
       <main className="flex-1 overflow-y-auto p-6">
-        <div className="mb-4 flex justify-end">
+        <div className="mb-4 flex items-center justify-end gap-4">
+          <AuthButton />
           <button
             type="button"
             onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
@@ -150,14 +154,14 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
         </div>
 
         {/* Stats */}
-        <div className="mb-5">
-          <StatsBar items={initialData} />
-        </div>
+
 
         {/* Deadline rail */}
-        <div className="mb-4">
-          <DeadlineRail items={initialData} />
-        </div>
+        {activeTab === "Tracker" && (
+          <div className="mb-4">
+            <DeadlineRail items={initialData} />
+          </div>
+        )}
 
         {/* Stale banner */}
         {staleItems.length > 0 && !dismissStale && (
@@ -193,60 +197,83 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
           </div>
         )}
 
-        {/* Search + filters */}
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <input
-            type="text"
-            placeholder="Search opportunities..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="min-w-[200px] flex-1 rounded border-2 border-border bg-bg-card px-3 py-2 text-sm font-medium text-ink shadow-hard-2 outline-none placeholder:text-ink-faint focus:bg-primary-soft"
-          />
+        {activeTab === "Tracker" && (
+          <>
+            {/* Search + filters */}
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <input
+                type="text"
+                placeholder="Search opportunities..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="min-w-[200px] flex-1 rounded border-2 border-border bg-bg-card px-3 py-2 text-sm font-medium text-ink shadow-hard-2 outline-none placeholder:text-ink-faint focus:bg-primary-soft"
+              />
 
-          {/* Type toggle */}
-          <div className="flex gap-px overflow-hidden rounded border-2 border-border bg-surface shadow-hard-1">
-            {(["all", "job", "hackathon"] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTypeFilter(t)}
-                className={`px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors ${
-                  typeFilter === t ? "bg-primary text-white" : "bg-bg-card text-ink-muted hover:bg-surface hover:text-ink"
-                }`}
-              >
-                {t === "all" ? "All" : t === "job" ? "Jobs" : "Hackathons"}
-              </button>
-            ))}
-          </div>
+              {/* Type toggle */}
+              <div className="flex gap-px overflow-hidden rounded border-2 border-border bg-surface shadow-hard-1">
+                {(["all", "job", "hackathon"] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setTypeFilter(t)}
+                    className={`px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors ${typeFilter === t ? "bg-primary text-white" : "bg-bg-card text-ink-muted hover:bg-surface hover:text-ink"
+                      }`}
+                  >
+                    {t === "all" ? "All" : t === "job" ? "Jobs" : "Hackathons"}
+                  </button>
+                ))}
+              </div>
 
-          {/* Status select */}
-          <div className="flex items-center gap-2">
-            {showStaleOnly && (
-              <button
-                onClick={() => setShowStaleOnly(false)}
-                className="rounded border-2 border-tertiary bg-tertiary px-3 py-2 text-xs font-bold text-ink shadow-hard-1 btn-push-sm"
-              >
-                Stale only ×
-              </button>
-            )}
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
-              className="rounded border-2 border-border bg-bg-card px-3 py-2 text-xs font-bold text-ink shadow-hard-1 outline-none"
-            >
-              <option value="all">All Statuses</option>
-              {STATUS_ORDER.map((s) => (
-                <option key={s} value={s}>{STATUS_LABEL[s]}</option>
-              ))}
-            </select>
-          </div>
-        </div>
+              {/* Status select */}
+              <div className="flex items-center gap-2">
+                {showStaleOnly && (
+                  <button
+                    onClick={() => setShowStaleOnly(false)}
+                    className="rounded border-2 border-tertiary bg-tertiary px-3 py-2 text-xs font-bold text-ink shadow-hard-1 btn-push-sm"
+                  >
+                    Stale only ×
+                  </button>
+                )}
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+                  className="rounded border-2 border-border bg-bg-card px-3 py-2 text-xs font-bold text-ink shadow-hard-1 outline-none"
+                >
+                  <option value="all">All Statuses</option>
+                  {STATUS_ORDER.map((s) => (
+                    <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
 
-        <OpportunityTable
-          items={filtered}
-          onEdit={(item) => setPanel(item)}
-          onAdd={() => setPanel("new")}
-        />
+            <OpportunityTable
+              items={filtered}
+              onEdit={(item) => setPanel(item)}
+              onAdd={() => setPanel("new")}
+            />
+            {/* <div className="mb-5 fixed bottom-6 w-[50%]">
+              <StatsBar items={initialData} />
+            </div> */}
+          </>
+        )}
+
+        {activeTab === "Calendar" && (
+          <CalendarView items={initialData} onItemClick={(item) => setPanel(item)} />
+        )}
+
+        {activeTab === "Notifications" && (
+          <NotificationsView items={initialData} onItemClick={(item) => setPanel(item)} />
+        )}
+
+        {activeTab === "Statistics" && (
+          <StatisticsView items={initialData} />
+        )}
+
+        {activeTab === "Settings" && (
+          <SettingsView theme={theme} setTheme={setTheme} />
+        )}
       </main>
+
 
       {/* Modal */}
       {panel && <AddEditPanel editing={panel} onClose={() => setPanel(null)} />}

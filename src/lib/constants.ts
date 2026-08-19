@@ -1,6 +1,8 @@
-import type { Opportunity } from "@/db/schema";
+import type { Opportunity, UserOpportunityTracking } from "@/db/schema";
 
-export const STATUS_ORDER: Opportunity["status"][] = [
+type Status = UserOpportunityTracking["status"];
+
+export const STATUS_ORDER: Status[] = [
   "found",
   "applied",
   "oa_assignment",
@@ -10,7 +12,7 @@ export const STATUS_ORDER: Opportunity["status"][] = [
   "hackathon_active",
 ];
 
-export const STATUS_LABEL: Record<Opportunity["status"], string> = {
+export const STATUS_LABEL: Record<Status, string> = {
   found:            "Found",
   applied:          "Applied",
   oa_assignment:    "OA / Assignment",
@@ -21,7 +23,7 @@ export const STATUS_LABEL: Record<Opportunity["status"], string> = {
 };
 
 // Background values used for status badges and select styling.
-export const STATUS_COLOR: Record<Opportunity["status"], string> = {
+export const STATUS_COLOR: Record<Status, string> = {
   found:            "var(--color-status-found)",
   applied:          "var(--color-status-applied)",
   oa_assignment:    "var(--color-status-oa-assignment)",
@@ -36,4 +38,4 @@ export const TYPE_LABEL: Record<Opportunity["type"], string> = {
   hackathon: "Hackathon",
 };
 
-export const TERMINAL_STATUSES: Opportunity["status"][] = ["selected", "rejected"];
+export const TERMINAL_STATUSES: Status[] = ["selected", "rejected"];
