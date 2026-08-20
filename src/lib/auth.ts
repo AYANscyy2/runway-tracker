@@ -7,6 +7,8 @@ import * as schema from "../db/schema";
 const ALLOWED_EMAILS = ["dhruti29032004@gmail.com", "mayan6378@gmail.com"];
 
 export const auth = betterAuth({
+  baseURL: process.env.BETTER_AUTH_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000"),
+  trustedOrigins: ["http://localhost:3000", "https://localhost:3000"],
   database: drizzleAdapter(db, {
     provider: "pg",
     schema: schema,
