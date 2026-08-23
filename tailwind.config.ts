@@ -5,36 +5,30 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Surfaces
         bg: "var(--color-bg)",
         "bg-card": "var(--color-bg-card)",
         surface: "var(--color-surface)",
         "surface-2": "var(--color-surface-2)",
         border: "var(--color-border)",
         "border-muted": "var(--color-border-muted)",
-        // Text
         ink: "var(--color-ink)",
         "ink-muted": "var(--color-ink-muted)",
         "ink-faint": "var(--color-ink-faint)",
-        // Primary – Coral
         primary: {
           DEFAULT: "var(--color-primary)",
           container: "var(--color-primary-container)",
           soft: "var(--color-primary-soft)",
         },
-        // Secondary – Teal
         secondary: {
           DEFAULT: "var(--color-secondary)",
           container: "var(--color-secondary-container)",
           soft: "var(--color-secondary-soft)",
         },
-        // Tertiary – Gold
         tertiary: {
           DEFAULT: "var(--color-tertiary)",
           container: "var(--color-tertiary-container)",
           soft: "var(--color-tertiary-soft)",
         },
-        // Semantic aliases (kept for existing code compatibility)
         amber: {
           DEFAULT: "var(--color-tertiary)",
           soft: "var(--color-tertiary-soft)",
@@ -65,11 +59,11 @@ const config: Config = {
         extrabold: "800",
       },
       borderRadius: {
-        sm:  "4px",
+        sm: "4px",
         DEFAULT: "4px",
-        md:  "4px",
-        lg:  "6px",
-        xl:  "6px",
+        md: "4px",
+        lg: "6px",
+        xl: "6px",
         full: "9999px",
       },
       boxShadow: {
@@ -85,9 +79,9 @@ const config: Config = {
       },
       letterSpacing: {
         tighter: "-0.02em",
-        tight:   "-0.01em",
-        wider:   "0.02em",
-        widest:  "0.05em",
+        tight: "-0.01em",
+        wider: "0.02em",
+        widest: "0.05em",
       },
     },
   },
