@@ -1,89 +1,225 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { OpportunityWithUrls } from "@/db/schema";
-import { STATUS_LABEL, STATUS_ORDER } from "@/lib/constants";
+import {
+  STALE_AFTER_DAYS,
+  STATUS_FOR_TYPE,
+  STATUS_LABEL,
+  STATUS_ORDER,
+  TERMINAL_STATUSES,
+  deadlineMatters,
+  type Status,
+} from "@/lib/constants";
 import { daysUntil } from "@/lib/dates";
-import { StatsBar } from "./StatsBar";
-import { DeadlineRail } from "./DeadlineRail";
+import { deleteOpportunity } from "@/app/actions";
 import { OpportunityTable } from "./OpportunityTable";
 import { AddEditPanel } from "./AddEditPanel";
-import AuthButton from "./AuthButton";
 import { CalendarView } from "./CalendarView";
 import { NotificationsView } from "./NotificationsView";
 import { StatisticsView } from "./StatisticsView";
 import { SettingsView } from "./SettingsView";
-type TypeFilter = "all" | "job" | "hackathon";
+import { UserMenu } from "./UserMenu";
+import { useToast } from "./Toast";
+import { IconBell, IconCalendar, IconChart, IconGear, IconGrid } from "./Icons";
 
-const NAV = [
-  { icon: "▦", label: "Tracker" },
-  { icon: "▭", label: "Calendar" },
-  { icon: <svg width="1.2em" height="1.2em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square" strokeLinejoin="miter" className="inline-block"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>, label: "Notifications" },
-  { icon: "≡", label: "Statistics" },
-  { icon: "⚙", label: "Settings" },
-] as const;
+type TypeFilter = "all" | "job" | "hackathon";
+type StatusFilter = "all" | Status;
+type QuickFilter = "" | "stale" | "overdue";
+type Tab = "tracker" | "calendar" | "agenda" | "stats" | "settings";
+
+const NAV: { id: Tab; label: string; icon: React.ReactNode }[] = [
+  { id: "tracker",  label: "Tracker",    icon: <IconGrid /> },
+  { id: "calendar", label: "Calendar",   icon: <IconCalendar /> },
+  { id: "agenda",   label: "Agenda",     icon: <IconBell /> },
+  { id: "stats",    label: "Statistics", icon: <IconChart /> },
+  { id: "settings", label: "Settings",   icon: <IconGear /> },
+];
+
+const TABS: Tab[] = NAV.map((n) => n.id);
+const UNDO_MS = 6000;
+
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+type ViewState = { tab: string; type: string; status: string; q: string; quick: string };
+const VIEW_KEYS = ["tab", "type", "status", "q", "quick"] as const;
 
 export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] }) {
+  const params = useSearchParams();
+  const toast = useToast();
+
+  // ── View state: React owns it, the URL mirrors it (shareable / reload-safe) ──
+  const [view, setView] = useState<ViewState>(() =>
+    Object.fromEntries(VIEW_KEYS.map((k) => [k, params.get(k) ?? ""])) as ViewState,
+  );
+  const setParams = useCallback((patch: Partial<ViewState>) => {
+    setView((v) => {
+      const next = { ...v, ...patch };
+      const url = new URL(window.location.href);
+      for (const k of VIEW_KEYS) {
+        if (next[k]) url.searchParams.set(k, next[k]);
+        else url.searchParams.delete(k);
+      }
+      window.history.replaceState(window.history.state, "", url);
+      return next;
+    });
+  }, []);
+
+  const activeTab: Tab = TABS.includes(view.tab as Tab) ? (view.tab as Tab) : "tracker";
+  const typeFilter = (view.type as TypeFilter) || "all";
+  const statusFilter = (view.status as StatusFilter) || "all";
+  const searchQuery = view.q;
+  const quick = (view.quick as QuickFilter) || "";
+  const searchRef = useRef<HTMLInputElement>(null);
+
   const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | OpportunityWithUrls["status"]>("all");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [showStaleOnly, setShowStaleOnly] = useState(false);
-  const [dismissStale, setDismissStale] = useState(false);
-  const [dismissReview, setDismissReview] = useState(false);
   const [panel, setPanel] = useState<OpportunityWithUrls | "new" | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState("Tracker");
+  const [dismissedStrip, setDismissedStrip] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Set<number>>(new Set());
+  const deleteTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
+  // Theme attribute is already set by the inline script in layout.tsx; just read it.
   useEffect(() => {
-    const storedTheme = window.localStorage.getItem("runway-theme") as "light" | "dark" | null;
-    const initialTheme = storedTheme ?? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-    setTheme(initialTheme);
-    document.documentElement.setAttribute("data-theme", initialTheme);
+    const t = document.documentElement.getAttribute("data-theme");
+    if (t === "dark" || t === "light") setTheme(t);
+  }, []);
+  const applyTheme = useCallback((t: "light" | "dark") => {
+    setTheme(t);
+    document.documentElement.setAttribute("data-theme", t);
+    try { window.localStorage.setItem("runway-theme", t); } catch {}
   }, []);
 
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    window.localStorage.setItem("runway-theme", theme);
-  }, [theme]);
+    try { setDismissedStrip(window.localStorage.getItem("runway-strip-dismissed") === todayKey()); } catch {}
+  }, []);
+  function dismissStrip() {
+    setDismissedStrip(true);
+    try { window.localStorage.setItem("runway-strip-dismissed", todayKey()); } catch {}
+  }
+
+  // ── Derived sets ─────────────────────────────────────────────────
+  const visible = useMemo(
+    () => initialData.filter((i) => !pendingDelete.has(i.id)),
+    [initialData, pendingDelete],
+  );
 
   const staleItems = useMemo(() => {
     const nowMs = Date.now();
-    return initialData.filter((i) => {
-      if (i.status !== "applied") return false;
-      return (nowMs - new Date(i.updatedAt).getTime()) / 86_400_000 >= 14;
-    });
-  }, [initialData]);
+    return visible.filter(
+      (i) => i.status === "applied" && (nowMs - new Date(i.updatedAt).getTime()) / 86_400_000 >= STALE_AFTER_DAYS,
+    );
+  }, [visible]);
 
-  const isReviewDay = useMemo(() => {
-    const d = new Date().getDay();
-    return d === 2 || d === 4; // Tue or Thu
-  }, []);
+  const overdueItems = useMemo(
+    () => visible.filter((i) => deadlineMatters(i.type, i.status) && (daysUntil(i.deadline) ?? 1) < 0),
+    [visible],
+  );
 
-  const filtered = useMemo(() =>
-    initialData
+  const agendaCount = useMemo(
+    () =>
+      visible.filter((i) => {
+        if (TERMINAL_STATUSES.includes(i.status)) return false;
+        const d = deadlineMatters(i.type, i.status) ? daysUntil(i.deadline) : null;
+        const f = daysUntil(i.followUpDate);
+        return (d !== null && d <= 0) || (f !== null && f <= 0);
+      }).length,
+    [visible],
+  );
+
+  const isReviewDay = useMemo(() => [2, 4].includes(new Date().getDay()), []);
+
+  const statusOptions = typeFilter === "all" ? STATUS_ORDER : STATUS_FOR_TYPE[typeFilter];
+
+  const filtered = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return visible
       .filter((i) => typeFilter === "all" || i.type === typeFilter)
       .filter((i) => statusFilter === "all" || i.status === statusFilter)
-      .filter((i) => !searchQuery || i.name.toLowerCase().includes(searchQuery.toLowerCase()))
-      .filter((i) => !showStaleOnly || staleItems.includes(i))
-      .sort((a, b) => {
-        const da = daysUntil(a.deadline);
-        const db = daysUntil(b.deadline);
-        if (da === null && db === null) return 0;
-        if (da === null) return 1;
-        if (db === null) return -1;
-        return da - db;
-      }),
-    [initialData, typeFilter, statusFilter, searchQuery, showStaleOnly, staleItems]);
+      .filter((i) => {
+        if (!q) return true;
+        return [i.name, i.source, i.referralContact, i.nextAction, i.notes]
+          .some((v) => v?.toLowerCase().includes(q));
+      })
+      .filter((i) => {
+        if (quick === "stale") return staleItems.includes(i);
+        if (quick === "overdue") return overdueItems.includes(i);
+        return true;
+      });
+  }, [visible, typeFilter, statusFilter, searchQuery, quick, staleItems, overdueItems]);
+
+  // ── Delete with undo ─────────────────────────────────────────────
+  const requestDelete = useCallback((item: OpportunityWithUrls) => {
+    setPendingDelete((s) => new Set(s).add(item.id));
+    setPanel(null);
+    const timer = setTimeout(async () => {
+      deleteTimers.current.delete(item.id);
+      const res = await deleteOpportunity(item.id);
+      if (!res.ok) {
+        setPendingDelete((s) => { const n = new Set(s); n.delete(item.id); return n; });
+        toast.push({ message: `Couldn't delete: ${res.error}`, tone: "danger" });
+      }
+    }, UNDO_MS);
+    deleteTimers.current.set(item.id, timer);
+    toast.push({
+      message: `Removed ${item.name}`,
+      duration: UNDO_MS,
+      action: {
+        label: "Undo",
+        onClick: () => {
+          const t = deleteTimers.current.get(item.id);
+          if (t) clearTimeout(t);
+          deleteTimers.current.delete(item.id);
+          setPendingDelete((s) => { const n = new Set(s); n.delete(item.id); return n; });
+        },
+      },
+    });
+  }, [toast]);
+
+  // ── Keyboard shortcuts ───────────────────────────────────────────
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (panel) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(tag) || (e.target as HTMLElement)?.isContentEditable) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "n") { e.preventDefault(); setPanel("new"); }
+      if (e.key === "/") { e.preventDefault(); setParams({ tab: "" }); searchRef.current?.focus(); }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [panel, setParams]);
+
+  const goTab = (t: Tab) => setParams({ tab: t === "tracker" ? "" : t });
+
+  const stripLines: { text: string; cta?: { label: string; onClick: () => void } }[] = [];
+  if (overdueItems.length > 0)
+    stripLines.push({
+      text: `${overdueItems.length} deadline${overdueItems.length > 1 ? "s have" : " has"} passed — update their status or drop them.`,
+      cta: { label: "Clean up", onClick: () => setParams({ tab: "", quick: "overdue" }) },
+    });
+  if (staleItems.length > 0)
+    stripLines.push({
+      text: `${staleItems.length} application${staleItems.length > 1 ? "s haven't" : " hasn't"} moved in ${STALE_AFTER_DAYS} days.`,
+      cta: { label: "Review", onClick: () => setParams({ tab: "", quick: "stale" }) },
+    });
+  if (isReviewDay)
+    stripLines.push({
+      text: `It's ${new Date().toLocaleDateString("en", { weekday: "long" })} — time for your weekly runway review.`,
+      cta: { label: "Open agenda", onClick: () => goTab("agenda") },
+    });
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg">
       {/* ─── Sidebar ─── */}
       <aside
-        className={`relative flex shrink-0 flex-col border-r-2 border-border bg-surface transition-all duration-200 ease-in-out ${sidebarOpen ? "w-44" : "w-14"
-          }`}
+        className={`relative flex shrink-0 flex-col border-r-2 border-border bg-surface transition-all duration-200 ease-in-out ${
+          sidebarOpen ? "w-44" : "w-14"
+        }`}
       >
-        {/* Toggle button — sits on the border edge */}
         <button
           onClick={() => setSidebarOpen((o) => !o)}
           title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
@@ -92,8 +228,7 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
           {sidebarOpen ? "‹" : "›"}
         </button>
 
-        <div className={`flex flex-col flex-1 overflow-hidden p-3 ${sidebarOpen ? "items-start" : "items-center"}`}>
-          {/* Branding */}
+        <div className={`flex flex-1 flex-col overflow-hidden p-3 ${sidebarOpen ? "items-start" : "items-center"}`}>
           <div className="mb-6 w-full">
             {sidebarOpen ? (
               <>
@@ -107,185 +242,156 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
             )}
           </div>
 
-          {/* CTA */}
           <button
             onClick={() => setPanel("new")}
-            title="Log opportunity"
-            className={`mb-6 rounded border-2 border-border bg-primary font-bold text-white shadow-hard-1 btn-push ${sidebarOpen
-              ? "w-full px-3 py-2 text-sm"
-              : "flex h-8 w-8 items-center justify-center text-base"
-              }`}
+            title="Log opportunity (n)"
+            className={`mb-6 rounded border-2 border-border bg-primary font-bold text-white shadow-hard-1 btn-push ${
+              sidebarOpen ? "w-full px-3 py-2 text-sm" : "flex h-8 w-8 items-center justify-center text-base"
+            }`}
           >
             {sidebarOpen ? "+ Log opportunity" : "+"}
           </button>
 
-          {/* Nav */}
           <nav className="flex w-full flex-col gap-1">
-            {NAV.map(({ icon, label }) => (
-              <button
-                key={label}
-                onClick={() => setActiveTab(label)}
-                title={!sidebarOpen ? label : undefined}
-                className={`flex items-center rounded font-bold transition-colors ${sidebarOpen ? "gap-2.5 px-3 py-2 text-sm" : "justify-center px-0 py-2 text-base w-full"
-                  } ${activeTab === label
-                    ? "border-2 border-border bg-primary text-white shadow-hard-1"
-                    : "text-ink-muted hover:bg-surface-2 hover:text-ink"
-                  }`}
-              >
-                <span className={sidebarOpen ? "text-xs opacity-70" : ""}>{icon}</span>
-                {sidebarOpen && label}
-              </button>
-            ))}
+            {NAV.map(({ id, icon, label }) => {
+              const active = activeTab === id;
+              const badge = id === "agenda" ? agendaCount : 0;
+              return (
+                <button
+                  key={id}
+                  onClick={() => goTab(id)}
+                  title={!sidebarOpen ? label : undefined}
+                  aria-current={active ? "page" : undefined}
+                  className={`relative flex items-center rounded font-bold transition-colors ${
+                    sidebarOpen ? "gap-2.5 px-3 py-2 text-sm" : "w-full justify-center px-0 py-2 text-base"
+                  } ${active ? "border-2 border-border bg-primary text-white shadow-hard-1" : "text-ink-muted hover:bg-surface-2 hover:text-ink"}`}
+                >
+                  <span className={`flex items-center ${sidebarOpen ? "text-sm opacity-80" : ""}`}>{icon}</span>
+                  {sidebarOpen && <span className="flex-1 text-left">{label}</span>}
+                  {badge > 0 && (
+                    <span
+                      className={`flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-border px-1 text-[10px] font-extrabold ${
+                        active ? "bg-bg-card text-primary" : "bg-danger text-white"
+                      } ${sidebarOpen ? "" : "absolute -right-0.5 -top-0.5 h-4 min-w-4 text-[9px]"}`}
+                    >
+                      {badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </nav>
         </div>
       </aside>
 
       {/* ─── Main ─── */}
-      <main className="flex-1 overflow-y-auto p-6">
-        <div className="mb-4 flex items-center justify-end gap-4">
-          <AuthButton />
-          <button
-            type="button"
-            onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-            className="rounded border-2 border-border bg-bg-card px-3 py-2 text-xs font-extrabold uppercase tracking-[0.24em] text-ink shadow-hard-1 transition-colors hover:bg-surface"
-          >
-            {theme === "dark" ? "☀ Light" : "☾ Dark"}
-          </button>
+      <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <h2 className="text-lg font-extrabold tracking-tight text-ink">
+            {NAV.find((n) => n.id === activeTab)?.label}
+          </h2>
+          <UserMenu
+            theme={theme}
+            onToggleTheme={() => applyTheme(theme === "dark" ? "light" : "dark")}
+            onOpenSettings={() => goTab("settings")}
+          />
         </div>
 
-        {/* Stats */}
-
-
-        {/* Deadline rail */}
-        {activeTab === "Tracker" && (
-          <div className="mb-4">
-            <DeadlineRail items={initialData} />
-          </div>
-        )}
-
-        {/* Stale banner */}
-        {staleItems.length > 0 && !dismissStale && (
-          <div className="mb-3 flex items-center justify-between rounded border-2 border-border bg-tertiary-soft px-4 py-2.5 shadow-hard-1-muted">
-            <span className="flex items-center gap-2 text-sm font-bold text-ink">
-              <span>⚠</span>
-              {staleItems.length} applications haven&apos;t been updated in 14 days.
-            </span>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => { setShowStaleOnly(true); setDismissStale(true); }}
-                className="text-xs font-bold text-primary underline hover:no-underline"
-              >
-                View
-              </button>
-              <button onClick={() => setDismissStale(true)} className="font-bold text-ink-muted hover:text-ink">
-                ×
-              </button>
+        {/* One attention strip instead of stacked banners */}
+        {activeTab === "tracker" && stripLines.length > 0 && !dismissedStrip && (
+          <div className="mb-4 rounded border-2 border-border bg-tertiary-soft px-4 py-2.5 shadow-hard-1-muted">
+            <div className="flex items-start justify-between gap-3">
+              <ul className="flex flex-col gap-1.5 text-sm font-bold text-ink">
+                {stripLines.map((l) => (
+                  <li key={l.text} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span>{l.text}</span>
+                    {l.cta && (
+                      <button onClick={l.cta.onClick} className="text-xs font-extrabold uppercase tracking-wider text-primary underline hover:no-underline">
+                        {l.cta.label} →
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <button onClick={dismissStrip} aria-label="Dismiss for today" className="font-bold text-ink-muted hover:text-ink">×</button>
             </div>
           </div>
         )}
 
-        {/* Review nudge */}
-        {isReviewDay && !dismissReview && (
-          <div className="mb-3 flex items-center justify-between rounded border-2 border-border bg-secondary-soft px-4 py-2.5 shadow-hard-1-muted">
-            <span className="flex items-center gap-2 text-sm font-bold text-secondary">
-              <span>📅</span>
-              It&apos;s {new Date().toLocaleDateString("en", { weekday: "long" })}! Time for your weekly runway review →
-            </span>
-            <button onClick={() => setDismissReview(true)} className="font-bold text-secondary/60 hover:text-secondary">
-              ×
-            </button>
-          </div>
-        )}
-
-        {activeTab === "Tracker" && (
+        {activeTab === "tracker" && (
           <>
-            {/* Search + filters */}
             <div className="mb-4 flex flex-wrap items-center gap-3">
               <input
-                type="text"
-                placeholder="Search opportunities..."
+                ref={searchRef}
+                type="search"
+                placeholder="Search name, source, notes…  ( / )"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => setParams({ q: e.target.value })}
                 className="min-w-[200px] flex-1 rounded border-2 border-border bg-bg-card px-3 py-2 text-sm font-medium text-ink shadow-hard-2 outline-none placeholder:text-ink-faint focus:bg-primary-soft"
               />
 
-              {/* Type toggle */}
               <div className="flex gap-px overflow-hidden rounded border-2 border-border bg-surface shadow-hard-1">
                 {(["all", "job", "hackathon"] as const).map((t) => (
                   <button
                     key={t}
-                    onClick={() => setTypeFilter(t)}
-                    className={`px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors ${typeFilter === t ? "bg-primary text-white" : "bg-bg-card text-ink-muted hover:bg-surface hover:text-ink"
-                      }`}
+                    onClick={() => {
+                      // Drop a status that no longer applies to the chosen type.
+                      const keep = t === "all" || statusFilter === "all" || STATUS_FOR_TYPE[t].includes(statusFilter);
+                      setParams({ type: t === "all" ? "" : t, status: keep ? statusFilter === "all" ? "" : statusFilter : "" });
+                    }}
+                    className={`px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors ${
+                      typeFilter === t ? "bg-primary text-white" : "bg-bg-card text-ink-muted hover:bg-surface hover:text-ink"
+                    }`}
                   >
                     {t === "all" ? "All" : t === "job" ? "Jobs" : "Hackathons"}
                   </button>
                 ))}
               </div>
 
-              {/* Status select */}
-              <div className="flex items-center gap-2">
-                {showStaleOnly && (
-                  <button
-                    onClick={() => setShowStaleOnly(false)}
-                    className="rounded border-2 border-tertiary bg-tertiary px-3 py-2 text-xs font-bold text-ink shadow-hard-1 btn-push-sm"
-                  >
-                    Stale only ×
-                  </button>
-                )}
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
-                  className="rounded border-2 border-border bg-bg-card px-3 py-2 text-xs font-bold text-ink shadow-hard-1 outline-none"
+              <select
+                value={statusFilter}
+                onChange={(e) => setParams({ status: e.target.value === "all" ? "" : e.target.value })}
+                className="rounded border-2 border-border bg-bg-card px-3 py-2 text-xs font-bold text-ink shadow-hard-1 outline-none"
+              >
+                <option value="all">All statuses</option>
+                {statusOptions.map((s) => (
+                  <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+                ))}
+              </select>
+
+              {quick && (
+                <button
+                  onClick={() => setParams({ quick: "" })}
+                  className="rounded border-2 border-tertiary bg-tertiary-soft px-3 py-2 text-xs font-bold text-ink shadow-hard-1 btn-push-sm"
                 >
-                  <option value="all">All Statuses</option>
-                  {STATUS_ORDER.map((s) => (
-                    <option key={s} value={s}>{STATUS_LABEL[s]}</option>
-                  ))}
-                </select>
-              </div>
+                  {quick === "stale" ? "Stale only" : "Overdue only"} ×
+                </button>
+              )}
             </div>
 
             <OpportunityTable
               items={filtered}
+              totalCount={visible.length}
               onEdit={(item) => setPanel(item)}
               onAdd={() => setPanel("new")}
+              onClearFilters={() => setParams({ q: "", type: "", status: "", quick: "" })}
             />
-            {/* <div className="mb-5 fixed bottom-6 w-[50%]">
-              <StatsBar items={initialData} />
-            </div> */}
           </>
         )}
 
-        {activeTab === "Calendar" && (
-          <CalendarView items={initialData} onItemClick={(item) => setPanel(item)} />
-        )}
-
-        {activeTab === "Notifications" && (
-          <NotificationsView items={initialData} onItemClick={(item) => setPanel(item)} />
-        )}
-
-        {activeTab === "Statistics" && (
-          <StatisticsView items={initialData} />
-        )}
-
-        {activeTab === "Settings" && (
-          <SettingsView theme={theme} setTheme={setTheme} />
-        )}
+        {activeTab === "calendar" && <CalendarView items={visible} onItemClick={(item) => setPanel(item)} onAdd={() => setPanel("new")} />}
+        {activeTab === "agenda" && <NotificationsView items={visible} onItemClick={(item) => setPanel(item)} />}
+        {activeTab === "stats" && <StatisticsView items={visible} onAdd={() => setPanel("new")} />}
+        {activeTab === "settings" && <SettingsView theme={theme} setTheme={applyTheme} />}
       </main>
 
-
-      {/* Modal */}
-      {panel && <AddEditPanel editing={panel} onClose={() => setPanel(null)} />}
-
-      {/* Floating Action Button */}
-      <button
-        onClick={() => setPanel("new")}
-        className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full border-2 border-border bg-primary text-3xl font-extrabold text-white shadow-hard-2 btn-push"
-        aria-label="Log opportunity"
-      >
-        +
-      </button>
+      {panel && (
+        <AddEditPanel
+          editing={panel}
+          onClose={() => setPanel(null)}
+          onDelete={requestDelete}
+        />
+      )}
     </div>
   );
 }

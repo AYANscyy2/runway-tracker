@@ -10,12 +10,13 @@ const URGENCY_CLASSES: Record<Urgency, string> = {
 
 export function DeadlineStamp({
   deadline,
-  isTerminal,
+  muted,
 }: {
   deadline: string | Date | null;
-  isTerminal: boolean;
+  /** True when the deadline no longer needs action (applied, decided…). */
+  muted: boolean;
 }) {
-  const urgency = urgencyFor(deadline, isTerminal);
+  const urgency = urgencyFor(deadline, muted);
 
   return (
     <div className="inline-flex items-center gap-1">
@@ -23,7 +24,12 @@ export function DeadlineStamp({
         {formatDeadline(deadline)}
       </span>
       {urgency === "urgent" && (
-        <span className="text-[10px] text-danger" title="Action required soon">⚑</span>
+        <span className="rounded border border-danger bg-danger-soft px-1 py-px text-[9px] font-bold text-danger">
+          {countdownLabel(deadline)}
+        </span>
+      )}
+      {urgency === "overdue" && (
+        <span className="text-[9px] font-bold text-ink-faint">{countdownLabel(deadline)}</span>
       )}
       {urgency === "soon" && (
         <span

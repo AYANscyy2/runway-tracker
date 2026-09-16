@@ -24,9 +24,29 @@ export type OpportunityInput = {
   urls: { label: string; url: string }[];
 };
 
-export async function createOpportunity(data: OpportunityInput) {
+export type ActionResult = { ok: true } | { ok: false; error: string };
+
+// Server action errors are masked in production, so we return them as data
+// and let the client show a toast instead of throwing.
+async function run(fn: () => Promise<void>): Promise<ActionResult> {
+  try {
+    await fn();
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Something went wrong" };
+  }
+}
+
+async function requireSession() {
   const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) throw new Error("Unauthorized");
+  if (!session) throw new Error("You're signed out — sign in again.");
+  return session;
+}
+
+export async function createOpportunity(data: OpportunityInput): Promise<ActionResult> {
+  return run(async () => {
+  const session = await requireSession();
 
   const { urls, status, referralContact, foundDate, followUpDate, nextAction, notes, ...sharedData } = data;
 
@@ -55,12 +75,12 @@ export async function createOpportunity(data: OpportunityInput) {
       }))
     );
   }
-  revalidatePath("/");
+  });
 }
 
-export async function updateOpportunity(id: number, data: Partial<OpportunityInput>) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) throw new Error("Unauthorized");
+export async function updateOpportunity(id: number, data: Partial<OpportunityInput>): Promise<ActionResult> {
+  return run(async () => {
+  const session = await requireSession();
 
   const opp = await db.select().from(opportunities).where(eq(opportunities.id, id));
   if (!opp.length) {
@@ -133,12 +153,12 @@ export async function updateOpportunity(id: number, data: Partial<OpportunityInp
       );
     }
   }
-  revalidatePath("/");
+  });
 }
 
-export async function deleteOpportunity(id: number) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) throw new Error("Unauthorized");
+export async function deleteOpportunity(id: number): Promise<ActionResult> {
+  return run(async () => {
+  await requireSession();
 
   const opp = await db.select().from(opportunities).where(eq(opportunities.id, id));
   if (!opp.length) {
@@ -146,5 +166,5 @@ export async function deleteOpportunity(id: number) {
   }
 
   await db.delete(opportunities).where(eq(opportunities.id, id));
-  revalidatePath("/");
+  });
 }

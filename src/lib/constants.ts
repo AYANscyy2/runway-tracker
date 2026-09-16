@@ -1,6 +1,7 @@
 import type { Opportunity, UserOpportunityTracking } from "@/db/schema";
 
-type Status = UserOpportunityTracking["status"];
+export type Status = UserOpportunityTracking["status"];
+export type OppType = Opportunity["type"];
 
 export const STATUS_ORDER: Status[] = [
   "found",
@@ -11,6 +12,13 @@ export const STATUS_ORDER: Status[] = [
   "rejected",
   "hackathon_active",
 ];
+
+// Jobs and hackathons share a pipeline shape but not every stage applies to
+// both — a job never becomes "Hackathon Active" and a hackathon has no OA.
+export const STATUS_FOR_TYPE: Record<OppType, Status[]> = {
+  job:       ["found", "applied", "oa_assignment", "in_progress", "selected", "rejected"],
+  hackathon: ["found", "applied", "hackathon_active", "selected", "rejected"],
+};
 
 export const STATUS_LABEL: Record<Status, string> = {
   found:            "Found",
@@ -33,9 +41,22 @@ export const STATUS_COLOR: Record<Status, string> = {
   hackathon_active: "var(--color-status-hackathon-active)",
 };
 
-export const TYPE_LABEL: Record<Opportunity["type"], string> = {
+export const TYPE_LABEL: Record<OppType, string> = {
   job:      "Company",
   hackathon: "Hackathon",
 };
 
 export const TERMINAL_STATUSES: Status[] = ["selected", "rejected"];
+
+/** Days an "applied" entry can sit untouched before we call it stale. */
+export const STALE_AFTER_DAYS = 14;
+
+/**
+ * A deadline is only actionable while you still have to act on it. For a job
+ * that's the application deadline — once you've applied it's moot. For a
+ * hackathon the date is the event itself, so it matters until it's decided.
+ */
+export function deadlineMatters(type: OppType, status: Status): boolean {
+  if (TERMINAL_STATUSES.includes(status)) return false;
+  return type === "hackathon" || status === "found";
+}

@@ -29,14 +29,12 @@ export default async function Home({
           <div className="bg-red-500/10 border border-red-500/50 text-red-500 px-6 py-4 rounded-lg max-w-md w-full mb-4">
             <h3 className="font-bold text-lg mb-1">Authentication Error</h3>
             <code className="block bg-black/20 p-2 rounded text-sm mb-3 font-mono">{error}</code>
-            <p className="text-sm opacity-80">
-              Please check your Vercel deployment logs for the exact cause of this error.
-            </p>
+            <p className="text-sm opacity-80">Sign-in didn&apos;t go through. Try again.</p>
           </div>
         )}
-        <h2 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Welcome to Runway</h2>
-        <p className="text-gray-500 max-w-md dark:text-gray-400">Please sign in to view and manage your job applications and hackathons.</p>
-        <div className="fixed bottom-6 right-6">
+        <h1 className="text-3xl font-extrabold tracking-tighter text-primary">Runway</h1>
+        <p className="max-w-md text-ink-muted">Every opportunity. One place. Sign in to see your pipeline.</p>
+        <div className="mt-2">
           <AuthButton />
         </div>
       </div>

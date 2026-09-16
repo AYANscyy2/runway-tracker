@@ -3,8 +3,22 @@
 import type { OpportunityWithUrls } from "@/db/schema";
 import { STATUS_COLOR, STATUS_LABEL, STATUS_ORDER } from "@/lib/constants";
 
-export function StatisticsView({ items }: { items: OpportunityWithUrls[] }) {
+export function StatisticsView({ items, onAdd }: { items: OpportunityWithUrls[]; onAdd?: () => void }) {
   const total = items.length;
+
+  if (total === 0) {
+    return (
+      <div className="mx-auto flex max-w-2xl flex-col items-center gap-3 rounded-lg border-2 border-dashed border-border px-6 py-16 text-center">
+        <p className="text-base font-extrabold text-ink">No numbers yet</p>
+        <p className="max-w-sm text-sm text-ink-muted">Once you've logged a few opportunities you'll see your funnel — applied → interviews → offers — here.</p>
+        {onAdd && (
+          <button onClick={onAdd} className="mt-2 rounded border-2 border-border bg-primary px-5 py-2 text-sm font-bold text-white shadow-hard-1 btn-push">
+            + Log opportunity
+          </button>
+        )}
+      </div>
+    );
+  }
   
   const byStatus = items.reduce((acc, item) => {
     acc[item.status] = (acc[item.status] || 0) + 1;
@@ -33,12 +47,6 @@ export function StatisticsView({ items }: { items: OpportunityWithUrls[] }) {
 
   return (
     <div className="flex flex-col gap-8 max-w-5xl mx-auto w-full pb-10">
-      <div className="flex items-center justify-between border-b-4 border-border pb-4">
-        <h2 className="text-3xl font-black uppercase tracking-tighter text-ink">
-          Overview Statistics
-        </h2>
-      </div>
-
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard 
           title="Total Tracked" 

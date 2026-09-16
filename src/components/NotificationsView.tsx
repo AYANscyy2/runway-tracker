@@ -1,7 +1,7 @@
 "use client";
 
 import type { OpportunityWithUrls } from "@/db/schema";
-import { STATUS_COLOR, STATUS_LABEL } from "@/lib/constants";
+import { STATUS_COLOR, STATUS_LABEL, deadlineMatters } from "@/lib/constants";
 
 export function NotificationsView({ 
   items, 
@@ -38,7 +38,7 @@ export function NotificationsView({
       }
     };
 
-    checkDate(item.deadline, "Deadline");
+    if (deadlineMatters(item.type, item.status)) checkDate(item.deadline, "Deadline");
     checkDate(item.followUpDate, "Follow-up");
   });
 
@@ -100,6 +100,11 @@ export function NotificationsView({
 
   return (
     <div className="flex flex-col gap-2 max-w-4xl mx-auto w-full">
+      {overdue.length + todayItems.length + upcoming.length === 0 && (
+        <p className="mb-4 rounded border-2 border-dashed border-border px-4 py-6 text-center text-sm font-bold text-ink-muted">
+          Nothing needs your attention in the next two weeks. Nice.
+        </p>
+      )}
       {renderSection("Due Today", todayItems, "Nothing due today! Relax.", "var(--color-status-selected)")}
       {renderSection("Overdue", overdue, "All caught up! No overdue tasks.", "var(--color-status-rejected)")}
       {renderSection("Upcoming (Next 14 Days)", upcoming, "No upcoming deadlines in the next two weeks.", "var(--color-primary)")}

@@ -36,8 +36,8 @@ export function countdownLabel(deadline: string | Date | null): string {
 
 export type Urgency = "none" | "ok" | "soon" | "urgent" | "overdue";
 
-export function urgencyFor(deadline: string | Date | null, isTerminal: boolean): Urgency {
-  if (!deadline || isTerminal) return "none";
+export function urgencyFor(deadline: string | Date | null, muted: boolean): Urgency {
+  if (!deadline || muted) return "none";
   const days = daysUntil(deadline);
   if (days === null) return "none";
   if (days < 0) return "overdue";
