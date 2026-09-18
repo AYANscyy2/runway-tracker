@@ -65,8 +65,8 @@ export const opportunityStatus = pgEnum("opportunity_status", [
 ]);
 
 /**
- * Shared opportunity record — visible to all users.
- * Contains only the company/hackathon info, not personal tracking data.
+ * The opportunity itself (company/hackathon info). Owned by one user via
+ * `createdBy`; the per-user pipeline fields live in userOpportunityTracking.
  */
 export const opportunities = pgTable("opportunities", {
   id: serial("id").primaryKey(),
@@ -74,9 +74,9 @@ export const opportunities = pgTable("opportunities", {
   name: text("name").notNull(), // company name, or hackathon name
   source: text("source"), // LinkedIn, Devfolio, Unstop, referral, etc.
   deadline: date("deadline"), // application deadline or event date
-  // Who logged it. Only the creator may delete a shared record, since deleting
-  // cascades into every other user's tracking rows. Nullable for rows that
-  // predate this column.
+  // Owner. Opportunities are private — every read and mutation is scoped to
+  // this. Nullable only because rows predating the column exist; backfill
+  // them and treat null as "belongs to nobody".
   createdBy: text("created_by").references(() => user.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -123,7 +123,7 @@ export const opportunityUrls = pgTable("opportunity_urls", {
 export type OpportunityUrl = typeof opportunityUrls.$inferSelect;
 export type NewOpportunityUrl = typeof opportunityUrls.$inferInsert;
 
-/** Merged view: shared opportunity + user's tracking + urls */
+/** Merged view: opportunity + the owner's tracking + urls */
 export type OpportunityWithUrls = Opportunity & {
   status: UserOpportunityTracking["status"];
   foundDate: string | null;
@@ -132,9 +132,7 @@ export type OpportunityWithUrls = Opportunity & {
   nextAction: string | null;
   notes: string | null;
   trackingId: number | null;
-  /** When *this user's* tracking row last changed — not the shared record. Drives staleness. */
+  /** When the tracking row last changed (status, notes…), not the opportunity itself. Drives staleness. */
   trackedAt: Date | null;
-  /** Whether the current user is allowed to delete the shared record. */
-  canDelete: boolean;
   urls: OpportunityUrl[];
 };

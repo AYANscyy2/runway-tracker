@@ -5,24 +5,19 @@ was *supposed* to be, except it doesn't go stale because you forgot to open
 the tab.
 
 Built with Next.js (App Router, Server Actions), Drizzle ORM, Postgres,
-Better Auth (Google sign-in) and Tailwind. Small-group multi-user: a fixed
-allowlist of accounts, a shared pool of opportunities, and per-user status,
-notes and follow-ups on each one.
+Better Auth (Google sign-in) and Tailwind. Multi-user, fully private: sign
+in with Google and you get your own pipeline that nobody else can see.
 
 ## What it does
 
 - One table for both companies and hackathons (`type` field), since they
   move through the same pipeline: **found → applied → OA / in progress →
   selected / rejected** (hackathons get **hackathon active** instead of OA).
-- Opportunities are **shared** — anyone on the allowlist sees every company
-  and hackathon that's been logged. Your **status, notes, referral contact,
-  next action and follow-up date are yours alone**.
-- Only the person who logged an opportunity can delete it, since deleting
-  cascades into everyone's tracking rows.
+- Everything you log is **private to your account** — other users never see
+  your companies, deadlines or notes.
 - A calendar, an agenda of what's due today or overdue, and a stats view.
 - An attention strip on the tracker: passed deadlines, and "applied" entries
-  that haven't moved in 14 days (measured from *your* last update, not the
-  shared record).
+  that haven't moved in 14 days.
 - Inline status changes, search, type/status filters, undoable delete,
   keyboard shortcuts (`n` to log, `/` to search), light/dark theme.
 
@@ -58,7 +53,6 @@ Fill in `.env.local`:
 | `BETTER_AUTH_SECRET` | Any long random string (`openssl rand -base64 32`) |
 | `BETTER_AUTH_URL` | `http://localhost:3000` locally; your site URL in prod |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | From step 2 |
-| `ALLOWED_EMAILS` | Comma-separated Google emails allowed to sign in. **Required** — the app refuses to boot without it. |
 | `NEXT_PUBLIC_SITE_URL` | Public URL of the deployed site (optional in dev) |
 
 ## 4. Create the database tables
@@ -77,8 +71,7 @@ when creating enum types — run it in a real terminal, not a piped one.)
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and sign in with an
-allowlisted Google account.
+Open [http://localhost:3000](http://localhost:3000) and sign in with Google.
 
 ## Project structure
 
@@ -99,12 +92,11 @@ src/
     SettingsView.tsx
     DeadlineStamp.tsx     # deadline urgency badge
   db/
-    schema.ts             # opportunities, user_opportunity_tracking, opportunity_urls, auth tables
+    schema.ts             # opportunities (owned by created_by), user_opportunity_tracking, opportunity_urls, auth tables
     index.ts              # Drizzle client
   lib/
-    auth.ts               # Better Auth config + email allowlist
+    auth.ts               # Better Auth config
     validate.ts           # server-side input validation for the actions
-    permissions.ts        # who can delete what
     dates.ts              # deadline math
     constants.ts          # status/type labels, colors, per-type status sets
 ```

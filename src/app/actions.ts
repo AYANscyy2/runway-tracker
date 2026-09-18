@@ -1,11 +1,10 @@
 "use server";
 
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { opportunities, opportunityUrls, userOpportunityTracking, type NewOpportunity } from "@/db/schema";
 import { auth } from "@/lib/auth";
-import { canDeleteOpportunity } from "@/lib/permissions";
 import type { Status } from "@/lib/constants";
 import { validateOpportunityInput } from "@/lib/validate";
 import { headers } from "next/headers";
@@ -39,6 +38,16 @@ async function run(fn: () => Promise<void>): Promise<ActionResult> {
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Something went wrong" };
   }
+}
+
+/** Opportunities are private; a row you don't own is indistinguishable from one that doesn't exist. */
+async function requireOwned(id: number, userId: string) {
+  const [opp] = await db
+    .select()
+    .from(opportunities)
+    .where(and(eq(opportunities.id, id), eq(opportunities.createdBy, userId)));
+  if (!opp) throw new Error("Not found");
+  return opp;
 }
 
 async function requireSession() {
@@ -84,10 +93,7 @@ export async function updateOpportunity(id: number, input: Partial<OpportunityIn
   return run(async () => {
     const session = await requireSession();
 
-    const [opp] = await db.select().from(opportunities).where(eq(opportunities.id, id));
-    if (!opp) {
-      throw new Error("Not found");
-    }
+    const opp = await requireOwned(id, session.user.id);
 
     const data = validateOpportunityInput(input, { partial: true, currentType: opp.type });
     const { urls, status, referralContact, foundDate, followUpDate, nextAction, notes, ...sharedData } = data;
@@ -150,20 +156,7 @@ export async function deleteOpportunity(id: number): Promise<ActionResult> {
   return run(async () => {
     const session = await requireSession();
 
-    const [opp] = await db.select().from(opportunities).where(eq(opportunities.id, id));
-    if (!opp) {
-      throw new Error("Not found");
-    }
-
-    const [other] = await db
-      .select({ id: userOpportunityTracking.id })
-      .from(userOpportunityTracking)
-      .where(and(eq(userOpportunityTracking.opportunityId, id), ne(userOpportunityTracking.userId, session.user.id)))
-      .limit(1);
-
-    if (!canDeleteOpportunity(opp.createdBy, session.user.id, other !== undefined)) {
-      throw new Error("Only the person who logged this can delete it.");
-    }
+    await requireOwned(id, session.user.id);
 
     await db.delete(opportunities).where(eq(opportunities.id, id));
   });
