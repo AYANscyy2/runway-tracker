@@ -319,7 +319,7 @@ export function AddEditPanel({
         </Section>
 
         <div className="mt-6 flex items-center justify-between gap-2">
-          {isEdit ? (
+          {isEdit && editing.canDelete ? (
             <button
               type="button"
               onClick={() => onDelete(editing)}

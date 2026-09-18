@@ -1,9 +1,10 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { opportunities, opportunityUrls, userOpportunityTracking } from "@/db/schema";
 import { Dashboard } from "@/components/Dashboard";
 import AuthButton from "@/components/AuthButton";
 import { auth } from "@/lib/auth";
+import { canDeleteOpportunity } from "@/lib/permissions";
 import { headers } from "next/headers";
 import type { OpportunityWithUrls } from "@/db/schema";
 
@@ -53,16 +54,19 @@ export default async function Home({
 
   const oppIds = allOpps.map((o) => o.id);
 
-  // Fetch current user's tracking data for all opportunities
-  const trackingRows = await db
+  // Fetch tracking rows for every user: ours to merge in, everyone else's to
+  // decide whether a legacy (creator-less) record is safe to delete.
+  const allTracking = await db
     .select()
     .from(userOpportunityTracking)
-    .where(eq(userOpportunityTracking.userId, session.user.id));
+    .where(inArray(userOpportunityTracking.opportunityId, oppIds));
 
-  const trackingByOppId = trackingRows.reduce((acc, t) => {
-    acc[t.opportunityId] = t;
-    return acc;
-  }, {} as Record<number, typeof trackingRows[0]>);
+  const trackingByOppId: Record<number, typeof allTracking[0]> = {};
+  const trackedByOthers = new Set<number>();
+  for (const t of allTracking) {
+    if (t.userId === session.user.id) trackingByOppId[t.opportunityId] = t;
+    else trackedByOthers.add(t.opportunityId);
+  }
 
   // Fetch all URLs
   const urls = await db
@@ -88,6 +92,8 @@ export default async function Home({
       nextAction: tracking?.nextAction ?? null,
       notes: tracking?.notes ?? null,
       trackingId: tracking?.id ?? null,
+      trackedAt: tracking?.updatedAt ?? null,
+      canDelete: canDeleteOpportunity(opp.createdBy, session.user.id, trackedByOthers.has(opp.id)),
       urls: urlsByOppId[opp.id] || [],
     };
   });

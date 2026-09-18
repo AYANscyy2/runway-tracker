@@ -109,8 +109,11 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
 
   const staleItems = useMemo(() => {
     const nowMs = Date.now();
+    // Measured from the user's own tracking row, so marking something
+    // "applied" restarts the clock and other users' edits don't reset it.
     return visible.filter(
-      (i) => i.status === "applied" && (nowMs - new Date(i.updatedAt).getTime()) / 86_400_000 >= STALE_AFTER_DAYS,
+      (i) => i.status === "applied" && i.trackedAt !== null &&
+        (nowMs - new Date(i.trackedAt).getTime()) / 86_400_000 >= STALE_AFTER_DAYS,
     );
   }, [visible]);
 

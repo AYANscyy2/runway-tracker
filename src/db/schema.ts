@@ -74,6 +74,10 @@ export const opportunities = pgTable("opportunities", {
   name: text("name").notNull(), // company name, or hackathon name
   source: text("source"), // LinkedIn, Devfolio, Unstop, referral, etc.
   deadline: date("deadline"), // application deadline or event date
+  // Who logged it. Only the creator may delete a shared record, since deleting
+  // cascades into every other user's tracking rows. Nullable for rows that
+  // predate this column.
+  createdBy: text("created_by").references(() => user.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -128,5 +132,9 @@ export type OpportunityWithUrls = Opportunity & {
   nextAction: string | null;
   notes: string | null;
   trackingId: number | null;
+  /** When *this user's* tracking row last changed — not the shared record. Drives staleness. */
+  trackedAt: Date | null;
+  /** Whether the current user is allowed to delete the shared record. */
+  canDelete: boolean;
   urls: OpportunityUrl[];
 };
