@@ -6,6 +6,8 @@ import { db } from "@/db";
 import { opportunities, opportunityUrls, userOpportunityTracking, type NewOpportunity } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { canDeleteOpportunity } from "@/lib/permissions";
+import type { Status } from "@/lib/constants";
+import { validateOpportunityInput } from "@/lib/validate";
 import { headers } from "next/headers";
 
 export type OpportunityInput = {
@@ -15,7 +17,7 @@ export type OpportunityInput = {
   source: string | null;
   deadline: string | null;
   // Per-user fields
-  status: string;
+  status: Status;
   referralContact: string | null;
   foundDate: string | null;
   followUpDate: string | null;
@@ -45,9 +47,10 @@ async function requireSession() {
   return session;
 }
 
-export async function createOpportunity(data: OpportunityInput): Promise<ActionResult> {
+export async function createOpportunity(input: OpportunityInput): Promise<ActionResult> {
   return run(async () => {
     const session = await requireSession();
+    const data = validateOpportunityInput(input, { partial: false }) as OpportunityInput;
     const { urls, status, referralContact, foundDate, followUpDate, nextAction, notes, ...sharedData } = data;
 
     // One transaction: a failed URL insert must not leave an orphaned opportunity.
@@ -60,7 +63,7 @@ export async function createOpportunity(data: OpportunityInput): Promise<ActionR
       await tx.insert(userOpportunityTracking).values({
         userId: session.user.id,
         opportunityId: newOpp.id,
-        status: status as any,
+        status,
         referralContact,
         foundDate,
         followUpDate,
@@ -77,15 +80,16 @@ export async function createOpportunity(data: OpportunityInput): Promise<ActionR
   });
 }
 
-export async function updateOpportunity(id: number, data: Partial<OpportunityInput>): Promise<ActionResult> {
+export async function updateOpportunity(id: number, input: Partial<OpportunityInput>): Promise<ActionResult> {
   return run(async () => {
     const session = await requireSession();
 
-    const opp = await db.select().from(opportunities).where(eq(opportunities.id, id));
-    if (!opp.length) {
+    const [opp] = await db.select().from(opportunities).where(eq(opportunities.id, id));
+    if (!opp) {
       throw new Error("Not found");
     }
 
+    const data = validateOpportunityInput(input, { partial: true, currentType: opp.type });
     const { urls, status, referralContact, foundDate, followUpDate, nextAction, notes, ...sharedData } = data;
 
     const sharedUpdates: Record<string, any> = {};
@@ -117,7 +121,7 @@ export async function updateOpportunity(id: number, data: Partial<OpportunityInp
           .values({
             userId: session.user.id,
             opportunityId: id,
-            status: (status as any) ?? "found",
+            status: status ?? "found",
             referralContact: referralContact ?? null,
             foundDate: foundDate ?? null,
             followUpDate: followUpDate ?? null,

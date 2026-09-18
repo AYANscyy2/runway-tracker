@@ -4,19 +4,27 @@ A tracker for off-campus job leads and hackathons — the thing a spreadsheet
 was *supposed* to be, except it doesn't go stale because you forgot to open
 the tab.
 
-Built with Next.js (App Router, Server Actions), Drizzle ORM, Postgres, and
-Tailwind. No auth, no multi-user — this is a single-player tool for your own
-pipeline.
+Built with Next.js (App Router, Server Actions), Drizzle ORM, Postgres,
+Better Auth (Google sign-in) and Tailwind. Small-group multi-user: a fixed
+allowlist of accounts, a shared pool of opportunities, and per-user status,
+notes and follow-ups on each one.
 
 ## What it does
 
 - One table for both companies and hackathons (`type` field), since they
-  move through the same pipeline: **found → applied → in progress →
-  selected / rejected**.
-- A "next 7 days" rail so deadlines don't quietly slide past you.
-- Inline status changes — no save button, just pick a new status from the
-  dropdown in the row.
-- Filter by type and status, sorted by nearest deadline first.
+  move through the same pipeline: **found → applied → OA / in progress →
+  selected / rejected** (hackathons get **hackathon active** instead of OA).
+- Opportunities are **shared** — anyone on the allowlist sees every company
+  and hackathon that's been logged. Your **status, notes, referral contact,
+  next action and follow-up date are yours alone**.
+- Only the person who logged an opportunity can delete it, since deleting
+  cascades into everyone's tracking rows.
+- A calendar, an agenda of what's due today or overdue, and a stats view.
+- An attention strip on the tracker: passed deadlines, and "applied" entries
+  that haven't moved in 14 days (measured from *your* last update, not the
+  shared record).
+- Inline status changes, search, type/status filters, undoable delete,
+  keyboard shortcuts (`n` to log, `/` to search), light/dark theme.
 
 ## 1. Get a free Postgres database
 
@@ -27,88 +35,94 @@ Any standard Postgres connection string works. The fastest free option:
 
 Supabase or Railway work the same way if you'd rather use those.
 
-## 2. Set up the 
+## 2. Set up Google sign-in
+
+1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+   create an OAuth 2.0 client (Web application).
+2. Add `http://localhost:3000/api/auth/callback/google` as an authorised
+   redirect URI (and your production URL's equivalent later).
+3. Note the client ID and secret.
+
+## 3. Configure the environment
 
 ```bash
 npm install
 cp .env.example .env.local
-# paste your connection string into .env.local
 ```
 
-## 3. Create the database table
+Fill in `.env.local`:
+
+| Variable | What it is |
+| --- | --- |
+| `DATABASE_URL` | Postgres connection string |
+| `BETTER_AUTH_SECRET` | Any long random string (`openssl rand -base64 32`) |
+| `BETTER_AUTH_URL` | `http://localhost:3000` locally; your site URL in prod |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | From step 2 |
+| `ALLOWED_EMAILS` | Comma-separated Google emails allowed to sign in. **Required** — the app refuses to boot without it. |
+| `NEXT_PUBLIC_SITE_URL` | Public URL of the deployed site (optional in dev) |
+
+## 4. Create the database tables
 
 ```bash
 npm run db:push
 ```
 
-This reads `src/db/schema.ts` and creates the `opportunities` table directly
-— no migration files to manage, which is the right tradeoff for a personal
-tool like this.
+This reads `src/db/schema.ts` and syncs the tables directly. Re-run it
+whenever the schema changes. (`drizzle-kit push` may ask a yes/no question
+when creating enum types — run it in a real terminal, not a piped one.)
 
-**If `db:push` hangs on "Pulling schema from database..."**: on a brand-new
-database, `drizzle-kit push` needs to ask an interactive yes/no question to
-confirm creating the new enum types, and that prompt doesn't render in every
-terminal — it just looks frozen. Use the non-interactive path instead:
-
-```bash
-npm run db:generate   # writes SQL migration files to ./drizzle
-npm run db:migrate    # applies them directly, no prompts
-```
-
-`db:migrate` is also safe to re-run — already-applied migrations are skipped.
-
-## 4. Run it
+## 5. Run it
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000) and sign in with an
+allowlisted Google account.
 
 ## Project structure
 
 ```
 src/
   app/
-    page.tsx          # fetches data, renders the dashboard
-    actions.ts         # server actions: create / update / delete
+    page.tsx              # session check, fetch + merge, renders the dashboard
+    actions.ts            # server actions: create / update / delete
+    api/auth/[...all]/    # Better Auth route handler
     layout.tsx
   components/
-    Dashboard.tsx       # filters + layout glue
+    Dashboard.tsx         # sidebar, filters, view state (mirrored to the URL)
     OpportunityTable.tsx
-    AddEditPanel.tsx     # the add/edit modal
-    DeadlineStamp.tsx    # the deadline urgency badge
-    StatsBar.tsx
-    DeadlineRail.tsx
+    AddEditPanel.tsx      # add/edit dialog
+    CalendarView.tsx
+    NotificationsView.tsx # "Agenda" — due today / overdue
+    StatisticsView.tsx
+    SettingsView.tsx
+    DeadlineStamp.tsx     # deadline urgency badge
   db/
-    schema.ts            # the single `opportunities` table
+    schema.ts             # opportunities, user_opportunity_tracking, opportunity_urls, auth tables
     index.ts              # Drizzle client
   lib/
-    dates.ts               # deadline math
-    constants.ts            # status/type labels and colors
+    auth.ts               # Better Auth config + email allowlist
+    validate.ts           # server-side input validation for the actions
+    permissions.ts        # who can delete what
+    dates.ts              # deadline math
+    constants.ts          # status/type labels, colors, per-type status sets
 ```
 
 ## Deploying it
 
-Push this to a GitHub repo, import it on [Vercel](https://vercel.com), add
-`DATABASE_URL` as an environment variable in the project settings, and it's
-live. Works well as a portfolio link since it's a real working app with a
-real database, not a static mock.
+Push this to a GitHub repo, import it on [Vercel](https://vercel.com), and
+add every variable from the table above as environment variables. Set
+`BETTER_AUTH_URL` and `NEXT_PUBLIC_SITE_URL` to your production URL and add
+`<that URL>/api/auth/callback/google` to the Google OAuth client. Run
+`npm run db:push` once against the production database.
 
 ## Where to take it next
 
-A few obvious upgrades if you want to keep building on this rather than
-calling it done:
-
-- **Drag-and-drop Kanban view** grouped by status, instead of (or alongside)
-  the table — better for a quick visual scan of where everything sits.
-- **Deadline reminders** — a cron job (Vercel Cron works for free tiers)
-  that emails or pings you about anything due in the next 48 hours.
+- **Activity log** per opportunity (status change history) — would make the
+  stats view far more useful than snapshot counts.
+- **Deadline reminders** — a Vercel Cron job that emails or pings you about
+  anything due in the next 48 hours.
+- **CSV / JSON export** so your data isn't locked in.
 - **Browser extension or bookmarklet** to add an entry straight from a job
-  posting tab, instead of typing the name/link in by hand.
-- **CSV export** for when you want the data outside the app (e.g. to share
-  progress with a mentor).
-
-Any one of these is a legitimate scoped feature to add and talk about in an
-interview — "I built a tracker, then noticed X was annoying, so I added Y"
-is a much better story than a finished, static project.
+  posting tab.

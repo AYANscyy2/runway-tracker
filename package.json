@@ -6,10 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "node scripts/migrate.mjs",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@better-auth/drizzle-adapter": "^1.6.29",
