@@ -67,8 +67,15 @@ when creating enum types — run it in a real terminal, not a piped one.)
 
 **On a restricted network:** `drizzle-kit` connects over raw TCP on port
 5432, which campus and office wifi often block. The app itself is fine —
-it uses Neon's WebSocket driver on :443 — but schema pushes will time out.
-Use a hotspot, or run the SQL in Neon's web console instead.
+it uses Neon's WebSocket driver on :443 — but `db:push` will time out. Use
+a hotspot, Neon's web console, or hand-written SQL applied with:
+
+```bash
+npm run db:sql sql/001_inbox.sql   # goes over :443, runs in one transaction
+```
+
+Migrations in `sql/` are applied in filename order and are not tracked, so
+only run one that hasn't been applied yet.
 
 ## 5. Run it
 
@@ -97,8 +104,8 @@ src/
     SettingsView.tsx
     DeadlineStamp.tsx     # deadline urgency badge
   db/
-    schema.ts             # opportunities (owned by created_by), user_opportunity_tracking, opportunity_urls, auth tables
-    index.ts              # Drizzle client
+    schema.ts             # tracker + inbox tables, all scoped by user
+    index.ts              # Drizzle client (Neon WebSocket transport)
   lib/
     auth.ts               # Better Auth config
     validate.ts           # server-side input validation for the actions
