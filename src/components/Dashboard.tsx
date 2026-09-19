@@ -20,17 +20,19 @@ import { CalendarView } from "./CalendarView";
 import { NotificationsView } from "./NotificationsView";
 import { StatisticsView } from "./StatisticsView";
 import { SettingsView } from "./SettingsView";
+import { InboxView } from "./InboxView";
 import { UserMenu } from "./UserMenu";
 import { useToast } from "./Toast";
-import { IconBell, IconCalendar, IconChart, IconGear, IconGrid } from "./Icons";
+import { IconBell, IconCalendar, IconChart, IconGear, IconGrid, IconInbox } from "./Icons";
 
 type TypeFilter = "all" | "job" | "hackathon";
 type StatusFilter = "all" | Status;
 type QuickFilter = "" | "stale" | "overdue";
-type Tab = "tracker" | "calendar" | "agenda" | "stats" | "settings";
+type Tab = "tracker" | "inbox" | "calendar" | "agenda" | "stats" | "settings";
 
 const NAV: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "tracker",  label: "Tracker",    icon: <IconGrid /> },
+  { id: "inbox",    label: "Inbox",      icon: <IconInbox /> },
   { id: "calendar", label: "Calendar",   icon: <IconCalendar /> },
   { id: "agenda",   label: "Agenda",     icon: <IconBell /> },
   { id: "stats",    label: "Statistics", icon: <IconChart /> },
@@ -382,6 +384,7 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
           </>
         )}
 
+        {activeTab === "inbox" && <InboxView />}
         {activeTab === "calendar" && <CalendarView items={visible} onItemClick={(item) => setPanel(item)} onAdd={() => setPanel("new")} />}
         {activeTab === "agenda" && <NotificationsView items={visible} onItemClick={(item) => setPanel(item)} />}
         {activeTab === "stats" && <StatisticsView items={visible} onAdd={() => setPanel("new")} />}

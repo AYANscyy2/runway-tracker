@@ -54,6 +54,15 @@ export function IconGear({ className }: IconProps) {
   );
 }
 
+export function IconInbox({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M3 13h5l1 3h6l1-3h5" />
+      <path d="M5 5h14l2 8v6H3v-6l2-8z" />
+    </svg>
+  );
+}
+
 export function IconChevron({ className, open }: IconProps & { open?: boolean }) {
   return (
     <svg {...base} className={`${className ?? ""} transition-transform ${open ? "rotate-90" : ""}`}>
