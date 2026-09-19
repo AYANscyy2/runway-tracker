@@ -3,6 +3,7 @@ import { generateObject } from "ai";
 import { z } from "zod";
 import type { JobExtraction, MatchBreakdown, UserProfile } from "@/db/schema";
 import { MODEL_ID } from "./extract";
+import { convert, isKnownCurrency } from "./currency";
 
 /** Bump when weights or dimension meanings change, so old scores stay readable. */
 export const RUBRIC_VERSION = "2026-09-20.1";
@@ -48,18 +49,33 @@ function scoreComp(e: JobExtraction, p: UserProfile) {
   const target = p.targetCompMin;
   if (target === null) return { score: Math.round(max * 0.5), max, reason: "No target compensation set." };
   if (e.compMin === null && e.compMax === null) return { score: Math.round(max * 0.5), max, reason: "The posting doesn't state compensation." };
-  if (e.compCurrency && p.compCurrency && e.compCurrency.toUpperCase() !== p.compCurrency.toUpperCase()) {
-    return { score: Math.round(max * 0.5), max, reason: `Quoted in ${e.compCurrency}, your target is in ${p.compCurrency} — not compared.` };
+  // A posting in another currency is converted to yours at an approximate rate
+  // rather than skipped — $120k plainly clears an 18L target, and refusing to
+  // say so is the less useful answer.
+  const from = e.compCurrency?.trim().toUpperCase() ?? p.compCurrency;
+  const to = p.compCurrency.trim().toUpperCase();
+  const raw = e.compMax ?? e.compMin!;
+  let converted = false;
+
+  let offered = raw;
+  if (from !== to) {
+    if (!isKnownCurrency(from) || !isKnownCurrency(to)) {
+      return { score: Math.round(max * 0.5), max, reason: `Quoted in ${from}; no conversion rate to ${to}, so pay wasn't compared.` };
+    }
+    offered = convert(raw, from, to)!;
+    converted = true;
   }
 
-  const offered = e.compMax ?? e.compMin!;
+  // Indian digit grouping for rupees, Western grouping for everything else.
+  const grouped = raw.toLocaleString(from === "INR" ? "en-IN" : "en-US");
+  const note = converted ? ` (${grouped} ${from} converted at an approximate rate)` : "";
   if (offered >= target) {
     const stretch = p.targetCompMax && offered >= p.targetCompMax;
-    return { score: max, max, reason: stretch ? "At or above the top of your range." : "Clears your target." };
+    return { score: max, max, reason: `${stretch ? "At or above the top of your range" : "Clears your target"}${note}.` };
   }
   // Partial credit down to 60% of target, zero below that.
   const ratio = Math.max(0, (offered - target * 0.6) / (target * 0.4));
-  return { score: Math.round(max * ratio), max, reason: `Tops out below your target (${Math.round((offered / target) * 100)}% of it).` };
+  return { score: Math.round(max * ratio), max, reason: `Tops out below your target (${Math.round((offered / target) * 100)}% of it)${note}.` };
 }
 
 function scoreLocation(e: JobExtraction, p: UserProfile) {

@@ -1,4 +1,5 @@
 import type { Extraction } from "./schema";
+import { MAX_SANE_ANNUAL_INR, MIN_SANE_ANNUAL_INR, convert, isKnownCurrency } from "./currency";
 
 /**
  * Rules the Zod schema can't express: a response can be perfectly well-typed
@@ -8,11 +9,6 @@ import type { Extraction } from "./schema";
  */
 export type Violation = { rule: string; message: string };
 
-// A JD in INR below ~1L/yr or above ~20Cr is a units mistake, not a real offer
-// — usually a monthly figure passed through unconverted.
-const INR_MIN = 100_000;
-const INR_MAX = 200_000_000;
-
 const REMOTE_HINTS = /\b(remote|work from home|wfh|distributed team|anywhere)\b/i;
 const ONSITE_HINTS = /\b(on[- ]?site|in[- ]?office|in person|relocat)\b/i;
 
@@ -21,13 +17,18 @@ export function checkExtraction(e: Extraction, rawText: string): Violation | nul
     return { rule: "comp_inverted", message: `compMin (${e.compMin}) is greater than compMax (${e.compMax}).` };
   }
 
-  const currency = e.compCurrency?.toUpperCase() ?? null;
-  if (currency === "INR") {
+  // The units check runs for any currency we have a rate for, not just INR: a
+  // "$8,000" that was really per month is the same mistake as an unconverted
+  // LPA figure.
+  const currency = e.compCurrency?.trim().toUpperCase() ?? null;
+  if (currency && isKnownCurrency(currency)) {
     for (const [field, value] of [["compMin", e.compMin], ["compMax", e.compMax]] as const) {
-      if (value !== null && (value < INR_MIN || value > INR_MAX)) {
+      if (value === null) continue;
+      const inr = convert(value, currency, "INR");
+      if (inr !== null && (inr < MIN_SANE_ANNUAL_INR || inr > MAX_SANE_ANNUAL_INR)) {
         return {
           rule: "comp_out_of_range",
-          message: `${field} is ${value} INR, which is outside a believable annual range. If the posting quotes a monthly or LPA figure, convert it to annual rupees.`,
+          message: `${field} is ${value} ${currency}, which is not a believable annual salary. If the posting quotes a monthly, weekly or hourly figure, convert it to an annual one.`,
         };
       }
     }
