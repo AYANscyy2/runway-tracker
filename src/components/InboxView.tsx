@@ -1,8 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import type { InboxCard } from "@/db/schema";
-import { ingestPosting, listPostings, retryExtraction } from "@/app/inbox/actions";
+import {
+  dismissPosting,
+  ingestPosting,
+  listPostings,
+  restorePosting,
+  retryExtraction,
+  trackPosting,
+} from "@/app/inbox/actions";
 import { compBand, remoteLabel } from "@/lib/inbox/format";
 import { countdownLabel, formatDeadline } from "@/lib/dates";
 import { useToast } from "./Toast";
@@ -24,6 +32,7 @@ function bucketOf(card: InboxCard): Filter {
 
 export function InboxView() {
   const toast = useToast();
+  const router = useRouter();
   // The Inbox fetches its own data rather than receiving it from page.tsx:
   // tab switches never hit the server, and raw JD text must never ride along
   // in the tracker's payload.
@@ -61,6 +70,43 @@ export function InboxView() {
       const res = await retryExtraction(id);
       if (!res.ok) toast.push({ message: res.error, tone: "danger" });
       await load();
+    });
+  }
+
+  function track(card: InboxCard) {
+    startTransition(async () => {
+      const res = await trackPosting(card.id);
+      if (!res.ok) {
+        toast.push({ message: res.error, tone: "danger" });
+        return;
+      }
+      await load();
+      // The tracker's rows come from the server component, and switching tabs
+      // is client-side only — so ask for a fresh render or the new entry won't
+      // appear until a reload.
+      router.refresh();
+      toast.push({
+        message: `Added ${card.extraction?.company ?? "it"} to your tracker`,
+        action: { label: "View", onClick: () => { window.location.href = "/"; } },
+      });
+    });
+  }
+
+  function dismiss(card: InboxCard, reason: string) {
+    startTransition(async () => {
+      const res = await dismissPosting(card.id, reason);
+      if (!res.ok) {
+        toast.push({ message: res.error, tone: "danger" });
+        return;
+      }
+      await load();
+      toast.push({
+        message: "Dismissed",
+        action: {
+          label: "Undo",
+          onClick: () => startTransition(async () => { await restorePosting(card.id); await load(); }),
+        },
+      });
     });
   }
 
@@ -126,7 +172,15 @@ export function InboxView() {
       ) : (
         <div className="flex flex-col gap-3">
           {visible.map((card) => (
-            <PostingCard key={card.id} card={card} onRetry={() => retry(card.id)} busy={isPending} />
+            <PostingCard
+              key={card.id}
+              card={card}
+              onRetry={() => retry(card.id)}
+              onTrack={() => track(card)}
+              onDismiss={(reason) => dismiss(card, reason)}
+              onRestore={() => startTransition(async () => { await restorePosting(card.id); await load(); })}
+              busy={isPending}
+            />
           ))}
         </div>
       )}
@@ -169,8 +223,20 @@ function Pill({ children }: { children: React.ReactNode }) {
   );
 }
 
-function PostingCard({ card, onRetry, busy }: { card: InboxCard; onRetry: () => void; busy: boolean }) {
+const DISMISS_REASONS = ["Pay too low", "Wrong stack", "Wrong location", "Too senior", "Not interested"];
+
+function PostingCard({
+  card, onRetry, onTrack, onDismiss, onRestore, busy,
+}: {
+  card: InboxCard;
+  onRetry: () => void;
+  onTrack: () => void;
+  onDismiss: (reason: string) => void;
+  onRestore: () => void;
+  busy: boolean;
+}) {
   const [open, setOpen] = useState(false);
+  const [askingReason, setAskingReason] = useState(false);
   const e = card.extraction;
 
   if (card.status === "extracting") {
@@ -237,6 +303,63 @@ function PostingCard({ card, onRetry, busy }: { card: InboxCard; onRetry: () => 
           <IconChevron open={open} className="text-base" />
         </button>
       </div>
+
+      {/* ─── Actions ─── */}
+      {!dismissed && card.status !== "promoted" && (
+        askingReason ? (
+          <div className="flex flex-wrap items-center gap-1.5 border-t-2 border-border px-4 py-3">
+            <span className="mr-1 text-2xs font-extrabold uppercase tracking-wider text-ink-muted">Why?</span>
+            {DISMISS_REASONS.map((r) => (
+              <button
+                key={r}
+                onClick={() => { setAskingReason(false); onDismiss(r); }}
+                disabled={busy}
+                className="rounded border-2 border-border bg-surface px-2 py-1 text-2xs font-bold text-ink btn-push-sm disabled:opacity-50"
+              >
+                {r}
+              </button>
+            ))}
+            <button onClick={() => setAskingReason(false)} className="px-2 py-1 text-2xs font-bold text-ink-muted hover:text-ink">
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 border-t-2 border-border px-4 py-3">
+            <button
+              onClick={onTrack}
+              disabled={busy}
+              className="rounded border-2 border-border bg-primary px-3 py-1.5 text-xs font-extrabold uppercase tracking-wider text-white shadow-hard-1 btn-push-sm disabled:opacity-50"
+            >
+              Track
+            </button>
+            <button
+              onClick={() => setAskingReason(true)}
+              disabled={busy}
+              className="rounded border-2 border-border bg-bg-card px-3 py-1.5 text-xs font-extrabold uppercase tracking-wider text-ink-muted shadow-hard-1 btn-push-sm hover:text-ink disabled:opacity-50"
+            >
+              Dismiss
+            </button>
+          </div>
+        )
+      )}
+
+      {dismissed && (
+        <div className="flex items-center gap-2 border-t-2 border-border px-4 py-3">
+          <button
+            onClick={onRestore}
+            disabled={busy}
+            className="rounded border-2 border-border bg-bg-card px-3 py-1.5 text-xs font-extrabold uppercase tracking-wider text-ink shadow-hard-1 btn-push-sm disabled:opacity-50"
+          >
+            Restore
+          </button>
+        </div>
+      )}
+
+      {card.status === "promoted" && (
+        <div className="border-t-2 border-border px-4 py-3 text-xs font-bold text-ink-muted">
+          In your tracker ✓
+        </div>
+      )}
 
       {open && (
         <div className="border-t-2 border-border px-4 py-3 text-xs text-ink-muted">

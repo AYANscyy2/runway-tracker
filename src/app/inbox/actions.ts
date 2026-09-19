@@ -4,7 +4,15 @@ import { createHash } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { db } from "@/db";
-import { jobExtractions, jobPostings, type InboxCard, type JobPosting } from "@/db/schema";
+import {
+  jobExtractions,
+  jobPostings,
+  opportunities,
+  opportunityUrls,
+  userOpportunityTracking,
+  type InboxCard,
+  type JobPosting,
+} from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { run, type ActionResult } from "@/lib/action-result";
 import { extractJobDescription } from "@/lib/inbox/extract";
@@ -171,4 +179,108 @@ export async function listPostings(): Promise<ActionResult<InboxCard[]>> {
  * needs it, and that runs server-side. */
 function stripRawText(posting: JobPosting): JobPosting {
   return { ...posting, rawText: "" };
+}
+
+/** Dismiss with a reason. Kept rather than deleted — "pay too low" from three
+ * months ago is worth seeing when the same company posts again. */
+export async function dismissPosting(postingId: number, reason: string): Promise<ActionResult> {
+  return run(async () => {
+    const userId = await requireUserId();
+    const updated = await db
+      .update(jobPostings)
+      .set({ status: "dismissed", dismissedReason: reason.trim() || null, updatedAt: new Date() })
+      .where(and(eq(jobPostings.id, postingId), eq(jobPostings.userId, userId)))
+      .returning({ id: jobPostings.id });
+    if (updated.length === 0) throw new Error("Not found");
+  });
+}
+
+/** Undo a dismissal — back into the open bucket. */
+export async function restorePosting(postingId: number): Promise<ActionResult> {
+  return run(async () => {
+    const userId = await requireUserId();
+    const updated = await db
+      .update(jobPostings)
+      .set({ status: "new", dismissedReason: null, updatedAt: new Date() })
+      .where(and(eq(jobPostings.id, postingId), eq(jobPostings.userId, userId)))
+      .returning({ id: jobPostings.id });
+    if (updated.length === 0) throw new Error("Not found");
+  });
+}
+
+/**
+ * Promote a posting into the tracker. The extracted fields are *snapshotted*
+ * into the opportunity rather than joined live: once it's in your pipeline you
+ * own it, and editing the name shouldn't be second-guessed by whatever the
+ * model originally read. Returns the new opportunity id.
+ */
+export async function trackPosting(postingId: number): Promise<ActionResult<number>> {
+  return run(async () => {
+    const userId = await requireUserId();
+
+    const [row] = await db
+      .select({ posting: jobPostings, extraction: jobExtractions })
+      .from(jobPostings)
+      .leftJoin(jobExtractions, eq(jobExtractions.postingId, jobPostings.id))
+      .where(and(eq(jobPostings.id, postingId), eq(jobPostings.userId, userId)));
+
+    if (!row) throw new Error("Not found");
+    if (row.posting.status === "promoted" && row.posting.promotedOpportunityId) {
+      throw new Error("This is already in your tracker.");
+    }
+
+    const e = row.extraction;
+    const name = e?.company?.trim() || e?.role?.trim() || "Untitled opportunity";
+
+    const opportunityId = await db.transaction(async (tx) => {
+      const [opp] = await tx
+        .insert(opportunities)
+        .values({
+          createdBy: userId,
+          type: "job",
+          name,
+          source: row.posting.sourceUrl ? hostOf(row.posting.sourceUrl) : "Inbox",
+          deadline: e?.deadline ?? null,
+          role: e?.role ?? null,
+          stack: e?.stack ?? null,
+          compMin: e?.compMin ?? null,
+          compMax: e?.compMax ?? null,
+          location: e?.location ?? null,
+          remote: e?.remote ?? null,
+        })
+        .returning({ id: opportunities.id });
+
+      await tx.insert(userOpportunityTracking).values({
+        userId,
+        opportunityId: opp.id,
+        status: "found",
+        foundDate: new Date().toISOString().slice(0, 10),
+      });
+
+      if (row.posting.sourceUrl) {
+        await tx.insert(opportunityUrls).values({
+          opportunityId: opp.id,
+          label: "Posting",
+          url: row.posting.sourceUrl,
+        });
+      }
+
+      await tx
+        .update(jobPostings)
+        .set({ status: "promoted", promotedOpportunityId: opp.id, updatedAt: new Date() })
+        .where(eq(jobPostings.id, postingId));
+
+      return opp.id;
+    });
+
+    return opportunityId;
+  }, { revalidate: "/" });
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "Inbox";
+  }
 }
