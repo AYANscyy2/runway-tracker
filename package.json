@@ -12,14 +12,17 @@
     "db:sql": "node scripts/sql.mjs"
   },
   "dependencies": {
+    "@ai-sdk/google": "^4.0.76",
     "@better-auth/drizzle-adapter": "^1.6.29",
     "@neondatabase/serverless": "^1.1.0",
+    "ai": "^7.0.107",
     "better-auth": "^1.6.29",
     "drizzle-orm": "0.45.2",
     "next": "16.2.9",
     "postgres": "3.4.9",
     "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react-dom": "19.2.7",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "22.10.7",

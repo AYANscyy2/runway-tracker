@@ -1,12 +1,12 @@
 "use server";
 
 import { and, eq } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { opportunities, opportunityUrls, userOpportunityTracking, type NewOpportunity } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import type { Status } from "@/lib/constants";
 import { validateOpportunityInput } from "@/lib/validate";
+import { run, type ActionResult } from "@/lib/action-result";
 import { headers } from "next/headers";
 
 export type OpportunityInput = {
@@ -26,19 +26,6 @@ export type OpportunityInput = {
   urls: { label: string; url: string }[];
 };
 
-export type ActionResult = { ok: true } | { ok: false; error: string };
-
-// Server action errors are masked in production, so we return them as data
-// and let the client show a toast instead of throwing.
-async function run(fn: () => Promise<void>): Promise<ActionResult> {
-  try {
-    await fn();
-    revalidatePath("/");
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Something went wrong" };
-  }
-}
 
 /** Opportunities are private; a row you don't own is indistinguishable from one that doesn't exist. */
 async function requireOwned(id: number, userId: string) {
@@ -86,7 +73,7 @@ export async function createOpportunity(input: OpportunityInput): Promise<Action
         );
       }
     });
-  });
+  }, { revalidate: "/" });
 }
 
 export async function updateOpportunity(id: number, input: Partial<OpportunityInput>): Promise<ActionResult> {
@@ -149,7 +136,7 @@ export async function updateOpportunity(id: number, input: Partial<OpportunityIn
         }
       }
     });
-  });
+  }, { revalidate: "/" });
 }
 
 export async function deleteOpportunity(id: number): Promise<ActionResult> {
@@ -159,5 +146,5 @@ export async function deleteOpportunity(id: number): Promise<ActionResult> {
     await requireOwned(id, session.user.id);
 
     await db.delete(opportunities).where(eq(opportunities.id, id));
-  });
+  }, { revalidate: "/" });
 }

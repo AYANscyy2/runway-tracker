@@ -11,6 +11,10 @@ import type { OpportunityWithUrls } from "@/db/schema";
 // page, so there's no benefit to caching a stale pipeline.
 export const dynamic = "force-dynamic";
 
+// Inbox ingestion runs as a server action posted to this route, and a model
+// call plus a page fetch can take a while. Vercel's default is 10s.
+export const maxDuration = 60;
+
 export default async function Home({
   searchParams,
 }: {
