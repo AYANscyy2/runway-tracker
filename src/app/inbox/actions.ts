@@ -296,6 +296,91 @@ function hostOf(url: string): string {
   }
 }
 
+export type ManualPostingInput = {
+  role: string;
+  company: string;
+  stack: string[];
+  compMin: number | null;
+  compMax: number | null;
+  compCurrency: string | null;
+  location: string | null;
+  remote: JobExtraction["remote"];
+  deadline: string | null;
+  seniority: string | null;
+  sourceUrl: string | null;
+  notes: string | null;
+};
+
+/**
+ * Add a posting by hand. It lands in the same tables as a parsed one and is
+ * scored by the same rubric — the only difference is `model: "manual"`, so a
+ * bad score can always be traced back to whether a model was involved.
+ */
+export async function addManualPosting(input: ManualPostingInput): Promise<ActionResult<number>> {
+  return run(async () => {
+    const userId = await requireUserId();
+
+    const company = input.company.trim();
+    const role = input.role.trim();
+    if (!company && !role) throw new Error("Give it at least a role or a company.");
+
+    // The rubric's fit dimension reads text, and Retry needs something to work
+    // against, so a hand-filled entry still gets a readable body.
+    const rawText = [
+      role && `Role: ${role}`,
+      company && `Company: ${company}`,
+      input.location && `Location: ${input.location}`,
+      input.stack.length > 0 && `Technologies: ${input.stack.join(", ")}`,
+      input.seniority && `Seniority: ${input.seniority}`,
+      input.notes?.trim(),
+    ].filter(Boolean).join("\n");
+
+    const contentHash = hashContent(`manual:${userId}:${company}:${role}:${input.sourceUrl ?? ""}`);
+
+    const postingId = await db.transaction(async (tx) => {
+      const [posting] = await tx
+        .insert(jobPostings)
+        .values({ userId, sourceUrl: input.sourceUrl, rawText, contentHash, status: "new" })
+        .onConflictDoUpdate({
+          target: [jobPostings.userId, jobPostings.contentHash],
+          set: { status: "new", rawText, sourceUrl: input.sourceUrl, failureReason: null, updatedAt: new Date() },
+        })
+        .returning({ id: jobPostings.id });
+
+      const extraction = {
+        postingId: posting.id,
+        role: role || null,
+        company: company || null,
+        stack: input.stack,
+        compMin: input.compMin,
+        compMax: input.compMax,
+        compCurrency: input.compCurrency?.trim().toUpperCase() || null,
+        location: input.location?.trim() || null,
+        remote: input.remote,
+        deadline: input.deadline,
+        seniority: input.seniority?.trim() || null,
+        model: "manual",
+        promptVersion: "n/a",
+        attemptCount: 1,
+        retriedRule: null,
+        rawResponse: null,
+        inputTokens: null,
+        outputTokens: null,
+      };
+
+      await tx
+        .insert(jobExtractions)
+        .values(extraction)
+        .onConflictDoUpdate({ target: jobExtractions.postingId, set: extraction });
+
+      return posting.id;
+    });
+
+    await scorePosting(postingId, userId);
+    return postingId;
+  });
+}
+
 /* ────────────────────────────── Profile & scoring ────────────────────────── */
 
 export async function getProfile(): Promise<ActionResult<UserProfile | null>> {

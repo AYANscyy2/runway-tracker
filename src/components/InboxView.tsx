@@ -16,6 +16,7 @@ import { MAX_TOTAL } from "@/lib/inbox/rubric";
 import { countdownLabel, formatDeadline } from "@/lib/dates";
 import { useToast } from "./Toast";
 import { IconChevron } from "./Icons";
+import { ManualPostingForm } from "./ManualPostingForm";
 
 type Filter = "open" | "dismissed" | "tracked";
 type Sort = "score" | "newest" | "deadline";
@@ -61,6 +62,7 @@ export function InboxView() {
   const [filter, setFilter] = useState<Filter>("open");
   const [sort, setSort] = useState<Sort>("score");
   const [input, setInput] = useState("");
+  const [mode, setMode] = useState<"paste" | "manual">("paste");
   const [isPending, startTransition] = useTransition();
 
   const load = useCallback(async () => {
@@ -154,8 +156,26 @@ export function InboxView() {
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 pb-10">
-      {/* ─── Paste box ─── */}
+      {/* ─── Add box ─── */}
       <div className="rounded border-2 border-border bg-bg-card p-4 shadow-hard-2">
+        <div className="mb-3 flex gap-px overflow-hidden rounded border-2 border-border bg-surface">
+          {(["paste", "manual"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={`px-3 py-1.5 text-2xs font-extrabold uppercase tracking-wider transition-colors ${
+                mode === m ? "bg-primary text-white" : "bg-bg-card text-ink-muted hover:text-ink"
+              }`}
+            >
+              {m === "paste" ? "Paste or link" : "Type it in"}
+            </button>
+          ))}
+        </div>
+
+        {mode === "manual" ? (
+          <ManualPostingForm onDone={() => { setMode("paste"); void load(); }} onCancel={() => setMode("paste")} />
+        ) : (
+        <>
         <label htmlFor="jd-input" className="text-xs font-extrabold uppercase tracking-widest text-ink-muted">
           Paste a job description, or a link to one
         </label>
@@ -180,6 +200,8 @@ export function InboxView() {
             {isPending ? "Reading…" : "Add to inbox"}
           </button>
         </div>
+        </>
+        )}
       </div>
 
       {/* ─── Header + filters ─── */}
