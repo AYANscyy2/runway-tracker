@@ -71,7 +71,7 @@ export function CalendarView({
       {!hasAnyDates && (
         <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-border px-6 py-8 text-center">
           <p className="font-extrabold text-ink">No dates to show</p>
-          <p className="max-w-sm text-sm text-ink-muted">Add a deadline or follow-up date to an entry and it'll land on the calendar.</p>
+          <p className="max-w-sm text-sm text-ink-muted">Add a deadline or follow-up date to an entry and it&apos;ll land on the calendar.</p>
           {onAdd && (
             <button onClick={onAdd} className="mt-1 rounded border-2 border-border bg-primary px-4 py-1.5 text-sm font-bold text-white shadow-hard-1 btn-push">
               + Log opportunity

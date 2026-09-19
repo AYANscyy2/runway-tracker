@@ -22,6 +22,8 @@ import { run, type ActionResult } from "@/lib/action-result";
 import { extractJobDescription } from "@/lib/inbox/extract";
 import { FetchBlockedError, fetchJobDescription } from "@/lib/inbox/fetch-jd";
 import { RUBRIC_VERSION, scoreMatch } from "@/lib/inbox/rubric";
+import { STUCK_AFTER_MS } from "@/lib/inbox/constants";
+import { todayIso } from "@/lib/dates";
 
 async function requireUserId(): Promise<string> {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -179,11 +181,28 @@ export async function listPostings(): Promise<ActionResult<InboxCard[]>> {
       .orderBy(desc(jobPostings.createdAt));
 
     return rows.map(({ posting, extraction, score }) => ({
-      ...stripRawText(posting),
+      ...stripRawText(markStuck(posting)),
       extraction,
       score,
     }));
   });
+}
+
+/**
+ * Extraction is awaited inside the action, so a row only stays 'extracting'
+ * if the process died mid-call — a function timeout, a deploy, a crash. Left
+ * alone that card renders a skeleton forever with no way out, so anything
+ * still extracting well past the route's own time limit is reported as failed
+ * and becomes retryable.
+ */
+function markStuck(posting: JobPosting): JobPosting {
+  if (posting.status !== "extracting") return posting;
+  if (Date.now() - new Date(posting.updatedAt).getTime() < STUCK_AFTER_MS) return posting;
+  return {
+    ...posting,
+    status: "failed",
+    failureReason: "Reading this posting was interrupted — the server didn't finish. Retry to try again.",
+  };
 }
 
 /** rawText can be tens of kilobytes and the cards never render it; only Retry
@@ -265,7 +284,7 @@ export async function trackPosting(postingId: number): Promise<ActionResult<numb
         userId,
         opportunityId: opp.id,
         status: "found",
-        foundDate: new Date().toISOString().slice(0, 10),
+        foundDate: todayIso(),
       });
 
       if (row.posting.sourceUrl) {

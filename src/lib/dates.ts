@@ -7,6 +7,20 @@ function toCalendarDate(value: string | Date): Date {
   return new Date(y, m - 1, d);
 }
 
+/**
+ * Today as YYYY-MM-DD on the *local* calendar. `toISOString()` is UTC, so in
+ * IST it returns yesterday's date until 05:30 — which silently shifts "is this
+ * deadline past" and "was this dismissed today" by a day.
+ *
+ * On the server this is the server's local date (UTC on Vercel). Making that
+ * follow the viewer would mean storing their timezone; until then, server-side
+ * date comparisons are accurate to within a day.
+ */
+export function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 /** Whole-day difference between today and a deadline. Negative = overdue. */
 export function daysUntil(deadline: string | Date | null): number | null {
   if (!deadline) return null;

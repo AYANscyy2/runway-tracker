@@ -3,6 +3,24 @@
 import type { OpportunityWithUrls } from "@/db/schema";
 import { STATUS_COLOR, STATUS_LABEL, STATUS_ORDER } from "@/lib/constants";
 
+// Defined at module scope: a component created inside render is a new type on
+// every pass, so React remounts it and loses its DOM state.
+function StatCard({ title, value, sub }: { title: string; value: string | number; sub?: string }) {
+  return (
+    <div className="flex flex-col justify-between gap-2 rounded-2xl border-2 border-border bg-bg-card p-4 shadow-hard-2 transition-transform hover:-translate-y-1">
+      <h3 className="text-xs font-extrabold uppercase tracking-widest text-ink-muted">{title}</h3>
+      <p className="text-4xl sm:text-5xl font-black text-ink">{value}</p>
+      {sub ? (
+        <p className="text-xs font-bold text-ink-muted bg-surface inline-block px-2 py-1 rounded border-2 border-border self-start mt-2">
+          {sub}
+        </p>
+      ) : (
+        <div className="h-6 mt-2" /> 
+      )}
+    </div>
+  );
+}
+
 export function StatisticsView({ items, onAdd }: { items: OpportunityWithUrls[]; onAdd?: () => void }) {
   const total = items.length;
 
@@ -10,7 +28,7 @@ export function StatisticsView({ items, onAdd }: { items: OpportunityWithUrls[];
     return (
       <div className="mx-auto flex max-w-2xl flex-col items-center gap-3 rounded-lg border-2 border-dashed border-border px-6 py-16 text-center">
         <p className="text-base font-extrabold text-ink">No numbers yet</p>
-        <p className="max-w-sm text-sm text-ink-muted">Once you've logged a few opportunities you'll see your funnel — applied → interviews → offers — here.</p>
+        <p className="max-w-sm text-sm text-ink-muted">Once you&apos;ve logged a few opportunities you&apos;ll see your funnel — applied → interviews → offers — here.</p>
         {onAdd && (
           <button onClick={onAdd} className="mt-2 rounded border-2 border-border bg-primary px-5 py-2 text-sm font-bold text-white shadow-hard-1 btn-push">
             + Log opportunity
@@ -30,20 +48,6 @@ export function StatisticsView({ items, onAdd }: { items: OpportunityWithUrls[];
   const interviewCount = (byStatus["oa_assignment"] || 0) + (byStatus["in_progress"] || 0) + (byStatus["selected"] || 0) + (byStatus["rejected"] || 0);
 
   const offerCount = byStatus["selected"] || 0;
-
-  const StatCard = ({ title, value, sub }: { title: string, value: string | number, sub?: string }) => (
-    <div className="flex flex-col justify-between gap-2 rounded-2xl border-2 border-border bg-bg-card p-4 shadow-hard-2 transition-transform hover:-translate-y-1">
-      <h3 className="text-xs font-extrabold uppercase tracking-widest text-ink-muted">{title}</h3>
-      <p className="text-4xl sm:text-5xl font-black text-ink">{value}</p>
-      {sub ? (
-        <p className="text-xs font-bold text-ink-muted bg-surface inline-block px-2 py-1 rounded border-2 border-border self-start mt-2">
-          {sub}
-        </p>
-      ) : (
-        <div className="h-6 mt-2" /> 
-      )}
-    </div>
-  );
 
   return (
     <div className="flex flex-col gap-8 max-w-5xl mx-auto w-full pb-10">

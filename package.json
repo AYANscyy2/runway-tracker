@@ -9,7 +9,9 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "typecheck": "tsc --noEmit",
-    "db:sql": "node scripts/sql.mjs"
+    "db:sql": "node scripts/sql.mjs",
+    "lint": "eslint .",
+    "test": "node scripts/test.mjs"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.76",
@@ -31,6 +33,9 @@
     "autoprefixer": "10.4.20",
     "dotenv": "16.4.7",
     "drizzle-kit": "0.31.10",
+    "esbuild": "^0.28.2",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.5",
     "postcss": "8.5.15",
     "tailwindcss": "3.4.17",
     "typescript": "5.7.3"

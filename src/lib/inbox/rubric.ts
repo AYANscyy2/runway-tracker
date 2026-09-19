@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import type { JobExtraction, MatchBreakdown, MatchDimension, UserProfile } from "@/db/schema";
 import { MODEL_ID, QuotaError } from "./extract";
 import { convert, isKnownCurrency } from "./currency";
+import { todayIso } from "@/lib/dates";
 
 /** Bump when weights or dimension meanings change, so old scores stay readable. */
 export const RUBRIC_VERSION = "2026-09-20.1";
@@ -100,7 +101,7 @@ function scoreLocation(e: JobExtraction, p: UserProfile) {
 function scoreStartDate(e: JobExtraction, p: UserProfile) {
   const max = WEIGHTS.startDate;
   if (!e.deadline) return { score: max, max, reason: "No deadline stated." };
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIso();
   if (e.deadline < today) return { score: 0, max, reason: "The deadline has passed." };
   if (p.availableFrom && e.deadline < p.availableFrom) {
     return { score: Math.round(max * 0.5), max, reason: "Closes before you're available." };
@@ -111,7 +112,7 @@ function scoreStartDate(e: JobExtraction, p: UserProfile) {
 /** The fit dimension only depends on these. If none of them changed, the
  * previous answer is still the right answer — and worth reusing, because a
  * free-tier key is measured in tens of requests a day. */
-function fitKeyFor(e: JobExtraction, p: UserProfile): string {
+export function fitKeyFor(e: JobExtraction, p: UserProfile): string {
   return createHash("sha1")
     .update(JSON.stringify([
       e.role, e.company, e.seniority, e.stack ?? [],

@@ -12,7 +12,7 @@ import {
   deadlineMatters,
   type Status,
 } from "@/lib/constants";
-import { daysUntil } from "@/lib/dates";
+import { daysUntil, todayIso } from "@/lib/dates";
 import { deleteOpportunity } from "@/app/actions";
 import { OpportunityTable } from "./OpportunityTable";
 import { AddEditPanel } from "./AddEditPanel";
@@ -41,10 +41,6 @@ const NAV: { id: Tab; label: string; icon: React.ReactNode }[] = [
 
 const TABS: Tab[] = NAV.map((n) => n.id);
 const UNDO_MS = 6000;
-
-function todayKey() {
-  return new Date().toISOString().slice(0, 10);
-}
 
 type ViewState = { tab: string; type: string; status: string; q: string; quick: string };
 const VIEW_KEYS = ["tab", "type", "status", "q", "quick"] as const;
@@ -81,26 +77,38 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
   const [panel, setPanel] = useState<OpportunityWithUrls | "new" | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [dismissedStrip, setDismissedStrip] = useState(false);
+  const [isReviewDay, setIsReviewDay] = useState(false);
+  // Sampled once on mount rather than read during render: staleness only turns
+  // over daily, so a clock reading per render buys nothing and makes the
+  // render impure.
+  const [nowMs, setNowMs] = useState<number | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Set<number>>(new Set());
   const deleteTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
-  // Theme attribute is already set by the inline script in layout.tsx; just read it.
+  // Everything the server can't know: the theme the pre-paint script chose,
+  // whether today's strip was already dismissed, and today's weekday. All of
+  // it has to be read after hydration, so one mount effect rather than three.
+  /* eslint-disable react-hooks/set-state-in-effect -- reading browser-only state on mount is the point of this effect */
   useEffect(() => {
     const t = document.documentElement.getAttribute("data-theme");
     if (t === "dark" || t === "light") setTheme(t);
+    try {
+      setDismissedStrip(window.localStorage.getItem("runway-strip-dismissed") === todayIso());
+    } catch {}
+    setIsReviewDay([2, 4].includes(new Date().getDay()));
+    setNowMs(Date.now());
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
   const applyTheme = useCallback((t: "light" | "dark") => {
     setTheme(t);
     document.documentElement.setAttribute("data-theme", t);
     try { window.localStorage.setItem("runway-theme", t); } catch {}
   }, []);
 
-  useEffect(() => {
-    try { setDismissedStrip(window.localStorage.getItem("runway-strip-dismissed") === todayKey()); } catch {}
-  }, []);
   function dismissStrip() {
     setDismissedStrip(true);
-    try { window.localStorage.setItem("runway-strip-dismissed", todayKey()); } catch {}
+    try { window.localStorage.setItem("runway-strip-dismissed", todayIso()); } catch {}
   }
 
   // ── Derived sets ─────────────────────────────────────────────────
@@ -110,14 +118,14 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
   );
 
   const staleItems = useMemo(() => {
-    const nowMs = Date.now();
+    if (nowMs === null) return [];
     // Measured from the user's own tracking row, so marking something
     // "applied" restarts the clock and other users' edits don't reset it.
     return visible.filter(
       (i) => i.status === "applied" && i.trackedAt !== null &&
         (nowMs - new Date(i.trackedAt).getTime()) / 86_400_000 >= STALE_AFTER_DAYS,
     );
-  }, [visible]);
+  }, [visible, nowMs]);
 
   const overdueItems = useMemo(
     () => visible.filter((i) => deadlineMatters(i.type, i.status) && (daysUntil(i.deadline) ?? 1) < 0),
@@ -134,8 +142,6 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
       }).length,
     [visible],
   );
-
-  const isReviewDay = useMemo(() => [2, 4].includes(new Date().getDay()), []);
 
   const statusOptions = typeFilter === "all" ? STATUS_ORDER : STATUS_FOR_TYPE[typeFilter];
 

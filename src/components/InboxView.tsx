@@ -71,7 +71,18 @@ export function InboxView() {
     else toast.push({ message: res.error, tone: "danger" });
   }, [toast]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount is this view's whole contract
   useEffect(() => { void load(); }, [load]);
+
+  // A card is only 'extracting' if another tab or a reload caught a run in
+  // progress — this page awaits its own. Poll until it settles so the skeleton
+  // resolves on its own instead of waiting for a manual refresh.
+  const extracting = cards?.some((c) => c.status === "extracting") ?? false;
+  useEffect(() => {
+    if (!extracting) return;
+    const timer = setInterval(() => { void load(); }, 5000);
+    return () => clearInterval(timer);
+  }, [extracting, load]);
 
   function submit() {
     const value = input.trim();
@@ -111,7 +122,7 @@ export function InboxView() {
       router.refresh();
       toast.push({
         message: `Added ${card.extraction?.company ?? "it"} to your tracker`,
-        action: { label: "View", onClick: () => { window.location.href = "/"; } },
+        action: { label: "View", onClick: () => router.push("/") },
       });
     });
   }

@@ -1,5 +1,6 @@
 import type { Extraction } from "./schema";
 import { MAX_SANE_ANNUAL_INR, MIN_SANE_ANNUAL_INR, convert, isKnownCurrency } from "./currency";
+import { todayIso } from "@/lib/dates";
 
 /**
  * Rules the Zod schema can't express: a response can be perfectly well-typed
@@ -59,6 +60,6 @@ export function checkExtraction(e: Extraction, rawText: string): Violation | nul
  */
 export function isExpired(deadline: string | null): boolean {
   if (!deadline) return false;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIso();
   return deadline < today;
 }

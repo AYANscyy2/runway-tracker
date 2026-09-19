@@ -113,6 +113,20 @@ src/
     constants.ts          # status/type labels, colors, per-type status sets
 ```
 
+## Checks
+
+```bash
+npm run lint       # eslint, flat config
+npm run typecheck  # tsc --noEmit
+npm test           # node:test over the pure logic — no network, no database
+```
+
+`npm test` bundles `tests/*.test.ts` with esbuild and runs Node's own test
+runner. It covers the parts that are easy to break quietly: the extraction
+validation rules, currency conversion, the match rubric's arithmetic, and the
+date helpers. The rubric's one model-backed dimension is seeded with a cached
+fit so nothing reaches the network.
+
 ## Deploying it
 
 Push this to a GitHub repo, import it on [Vercel](https://vercel.com), and

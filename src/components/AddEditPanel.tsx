@@ -5,6 +5,7 @@ import { STATUS_FOR_TYPE, STATUS_LABEL, TYPE_LABEL, type Status } from "@/lib/co
 import type { OpportunityWithUrls } from "@/db/schema";
 import { createOpportunity, updateOpportunity, type OpportunityInput } from "@/app/actions";
 import { useToast } from "./Toast";
+import { todayIso } from "@/lib/dates";
 
 type FormState = {
   type: OpportunityWithUrls["type"];
@@ -31,7 +32,7 @@ function toFormState(o?: OpportunityWithUrls | null): FormState {
     deadline: o?.deadline ? String(o.deadline).slice(0, 10) : "",
     status: o?.status ?? "found",
     referralContact: o?.referralContact ?? "",
-    foundDate: o?.foundDate ? String(o.foundDate).slice(0, 10) : new Date().toISOString().slice(0, 10),
+    foundDate: o?.foundDate ? String(o.foundDate).slice(0, 10) : todayIso(),
     followUpDate: o?.followUpDate ? String(o.followUpDate).slice(0, 10) : "",
     nextAction: o?.nextAction ?? "",
     notes: o?.notes ?? "",
