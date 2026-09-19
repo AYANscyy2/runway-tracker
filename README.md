@@ -65,6 +65,11 @@ This reads `src/db/schema.ts` and syncs the tables directly. Re-run it
 whenever the schema changes. (`drizzle-kit push` may ask a yes/no question
 when creating enum types — run it in a real terminal, not a piped one.)
 
+**On a restricted network:** `drizzle-kit` connects over raw TCP on port
+5432, which campus and office wifi often block. The app itself is fine —
+it uses Neon's WebSocket driver on :443 — but schema pushes will time out.
+Use a hotspot, or run the SQL in Neon's web console instead.
+
 ## 5. Run it
 
 ```bash

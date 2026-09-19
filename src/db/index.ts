@@ -1,5 +1,5 @@
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
+import { drizzle } from "drizzle-orm/neon-serverless";
+import { Pool, neonConfig } from "@neondatabase/serverless";
 import * as schema from "./schema";
 
 const connectionString = process.env.DATABASE_URL;
@@ -10,9 +10,16 @@ if (!connectionString) {
   );
 }
 
-// `prepare: false` is required for connection poolers like Neon's pgbouncer mode / Supabase's pooler.
-// `ssl: "require"` is set explicitly (Neon's own docs recommend this) rather than relying on
-// the `sslmode=require` query param in the connection string being auto-parsed.
-const client = postgres(connectionString, { prepare: false, ssl: "require" });
+// Neon's driver tunnels Postgres over a WebSocket on :443 instead of a raw
+// TCP connection on :5432, which many restricted networks (campus/office wifi)
+// block outright. Node 22+ has a global WebSocket; older runtimes would need
+// the `ws` package.
+if (typeof WebSocket !== "undefined") {
+  neonConfig.webSocketConstructor = WebSocket;
+}
 
-export const db = drizzle(client, { schema });
+// The WebSocket transport (as opposed to Neon's HTTP one) keeps a real session
+// open, so interactive transactions in actions.ts still work.
+const pool = new Pool({ connectionString });
+
+export const db = drizzle(pool, { schema });
