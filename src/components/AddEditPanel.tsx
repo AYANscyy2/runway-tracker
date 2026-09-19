@@ -152,7 +152,7 @@ export function AddEditPanel({
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); handleSubmit(); }
         }}
-        className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-y-auto rounded-lg border-2 border-border bg-bg-card p-6 shadow-hard-3"
+        className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-y-auto rounded-lg border-2 border-border bg-bg-card p-4 shadow-hard-3 sm:max-h-[90vh] sm:p-6"
       >
         <div className="mb-5 flex items-center justify-between">
           <h2 id="panel-title" className="text-base font-extrabold text-ink">

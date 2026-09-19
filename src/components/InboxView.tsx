@@ -340,7 +340,7 @@ function PostingCard({
     <div className={`rounded border-2 border-border bg-bg-card shadow-hard-1 ${dismissed ? "opacity-60" : ""}`}>
       <div className="flex items-start justify-between gap-3 p-4">
         <div className="min-w-0">
-          <h3 className="truncate text-base font-extrabold tracking-tight text-ink">
+          <h3 className="text-base font-extrabold tracking-tight text-ink sm:truncate">
             {e?.role ?? "Untitled role"}
             {e?.company && <span className="font-bold text-ink-muted"> · {e.company}</span>}
           </h3>
@@ -356,7 +356,7 @@ function PostingCard({
             )}
           </div>
           {e?.stack && e.stack.length > 0 && (
-            <p className="mt-2 truncate text-xs font-medium text-ink-muted">{e.stack.join(" · ")}</p>
+            <p className="mt-2 line-clamp-2 text-xs font-medium text-ink-muted sm:truncate">{e.stack.join(" · ")}</p>
           )}
         </div>
 

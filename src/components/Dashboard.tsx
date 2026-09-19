@@ -221,7 +221,7 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
     <div className="flex h-screen overflow-hidden bg-bg">
       {/* ─── Sidebar ─── */}
       <aside
-        className={`relative flex shrink-0 flex-col border-r-2 border-border bg-surface transition-all duration-200 ease-in-out ${
+        className={`relative hidden shrink-0 flex-col border-r-2 border-border bg-surface transition-all duration-200 ease-in-out md:flex ${
           sidebarOpen ? "w-44" : "w-14"
         }`}
       >
@@ -290,10 +290,11 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
       </aside>
 
       {/* ─── Main ─── */}
-      <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+      <main className="flex-1 overflow-y-auto px-4 pb-24 pt-4 sm:p-6 md:pb-6">
         <div className="mb-4 flex items-center justify-between gap-4">
           <h2 className="text-lg font-extrabold tracking-tight text-ink">
-            {NAV.find((n) => n.id === activeTab)?.label}
+            <span className="text-primary md:hidden">Runway</span>
+            <span className="hidden md:inline">{NAV.find((n) => n.id === activeTab)?.label}</span>
           </h2>
           <UserMenu
             theme={theme}
@@ -390,6 +391,41 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
         {activeTab === "stats" && <StatisticsView items={visible} onAdd={() => setPanel("new")} />}
         {activeTab === "settings" && <SettingsView theme={theme} setTheme={applyTheme} />}
       </main>
+
+      {/* ─── Mobile: bottom nav replaces the sidebar ─── */}
+      <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t-2 border-border bg-surface md:hidden">
+        {NAV.map(({ id, icon, label }) => {
+          const active = activeTab === id;
+          const badge = id === "agenda" ? agendaCount : 0;
+          return (
+            <button
+              key={id}
+              onClick={() => goTab(id)}
+              aria-current={active ? "page" : undefined}
+              className={`relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[9px] font-extrabold uppercase tracking-wide transition-colors ${
+                active ? "text-primary" : "text-ink-muted"
+              }`}
+            >
+              <span className="text-base">{icon}</span>
+              <span className="truncate px-0.5">{label}</span>
+              {badge > 0 && (
+                <span className="absolute right-1/2 top-1 ml-3 flex h-4 min-w-4 translate-x-4 items-center justify-center rounded-full border-2 border-border bg-danger px-1 text-[8px] font-extrabold text-white">
+                  {badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* The sidebar's "+ Log opportunity" has nowhere to live on a phone. */}
+      <button
+        onClick={() => setPanel("new")}
+        aria-label="Log opportunity"
+        className="fixed bottom-20 right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full border-2 border-border bg-primary text-2xl font-extrabold text-white shadow-hard-2 btn-push md:hidden"
+      >
+        +
+      </button>
 
       {panel && (
         <AddEditPanel
