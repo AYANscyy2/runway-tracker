@@ -7,16 +7,21 @@ import { db } from "@/db";
 import {
   jobExtractions,
   jobPostings,
+  matchScores,
+  userProfiles,
   opportunities,
   opportunityUrls,
   userOpportunityTracking,
   type InboxCard,
+  type JobExtraction,
   type JobPosting,
+  type UserProfile,
 } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { run, type ActionResult } from "@/lib/action-result";
 import { extractJobDescription } from "@/lib/inbox/extract";
 import { FetchBlockedError, fetchJobDescription } from "@/lib/inbox/fetch-jd";
+import { RUBRIC_VERSION, scoreMatch } from "@/lib/inbox/rubric";
 
 async function requireUserId(): Promise<string> {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -70,7 +75,7 @@ export async function ingestPosting(input: IngestInput): Promise<ActionResult<nu
       })
       .returning();
 
-    await runExtraction(posting.id, rawText);
+    await runExtraction(posting.id, rawText, userId);
     return posting.id;
   });
 }
@@ -92,13 +97,13 @@ export async function retryExtraction(postingId: number): Promise<ActionResult> 
       .set({ status: "extracting", failureReason: null, updatedAt: new Date() })
       .where(eq(jobPostings.id, postingId));
 
-    await runExtraction(postingId, posting.rawText);
+    await runExtraction(postingId, posting.rawText, userId);
   });
 }
 
 /** Shared by ingest and retry. Never throws — it records the failure on the row
  * so the card can show it, which is the whole point of the 'extracting' write. */
-async function runExtraction(postingId: number, rawText: string): Promise<void> {
+async function runExtraction(postingId: number, rawText: string, userId: string): Promise<void> {
   try {
     const result = await extractJobDescription(rawText);
     const e = result.extraction;
@@ -142,6 +147,8 @@ async function runExtraction(postingId: number, rawText: string): Promise<void> 
       .update(jobPostings)
       .set({ status: "new", failureReason: null, updatedAt: new Date() })
       .where(eq(jobPostings.id, postingId));
+
+    await scorePosting(postingId, userId);
   } catch (err) {
     const message = err instanceof FetchBlockedError || err instanceof Error
       ? err.message
@@ -161,16 +168,20 @@ export async function listPostings(): Promise<ActionResult<InboxCard[]>> {
     const userId = await requireUserId();
 
     const rows = await db
-      .select({ posting: jobPostings, extraction: jobExtractions })
+      .select({ posting: jobPostings, extraction: jobExtractions, score: matchScores })
       .from(jobPostings)
       .leftJoin(jobExtractions, eq(jobExtractions.postingId, jobPostings.id))
+      .leftJoin(
+        matchScores,
+        and(eq(matchScores.postingId, jobPostings.id), eq(matchScores.userId, userId)),
+      )
       .where(eq(jobPostings.userId, userId))
       .orderBy(desc(jobPostings.createdAt));
 
-    return rows.map(({ posting, extraction }) => ({
+    return rows.map(({ posting, extraction, score }) => ({
       ...stripRawText(posting),
       extraction,
-      score: null,
+      score,
     }));
   });
 }
@@ -282,5 +293,95 @@ function hostOf(url: string): string {
     return new URL(url).hostname.replace(/^www\./, "");
   } catch {
     return "Inbox";
+  }
+}
+
+/* ────────────────────────────── Profile & scoring ────────────────────────── */
+
+export async function getProfile(): Promise<ActionResult<UserProfile | null>> {
+  return run(async () => {
+    const userId = await requireUserId();
+    const [profile] = await db.select().from(userProfiles).where(eq(userProfiles.userId, userId));
+    return profile ?? null;
+  });
+}
+
+export type ProfileInput = {
+  stack: string[];
+  targetCompMin: number | null;
+  targetCompMax: number | null;
+  compCurrency: string;
+  preferredLocations: string[];
+  remotePreference: UserProfile["remotePreference"];
+  availableFrom: string | null;
+  seniority: string | null;
+  notes: string | null;
+};
+
+/** Saving the profile rescores every open posting — a score computed against
+ * a stale profile is worse than no score, because it looks current. */
+export async function saveProfile(input: ProfileInput): Promise<ActionResult<number>> {
+  return run(async () => {
+    const userId = await requireUserId();
+
+    const values = {
+      userId,
+      stack: input.stack.map((s) => s.trim().toLowerCase()).filter(Boolean),
+      targetCompMin: input.targetCompMin,
+      targetCompMax: input.targetCompMax,
+      compCurrency: input.compCurrency.trim().toUpperCase() || "INR",
+      preferredLocations: input.preferredLocations.map((s) => s.trim()).filter(Boolean),
+      remotePreference: input.remotePreference,
+      availableFrom: input.availableFrom,
+      seniority: input.seniority?.trim() || null,
+      notes: input.notes?.trim() || null,
+      updatedAt: new Date(),
+    };
+
+    await db
+      .insert(userProfiles)
+      .values(values)
+      .onConflictDoUpdate({ target: userProfiles.userId, set: values });
+
+    return rescoreAllFor(userId);
+  });
+}
+
+/** Rescore every posting that still has a decision pending.
+ * Deliberately not exported: every export of a "use server" module is a public
+ * endpoint, and one taking a userId would let any caller act as another user. */
+async function rescoreAllFor(uid: string): Promise<number> {
+  const rows = await db
+    .select({ id: jobPostings.id })
+    .from(jobPostings)
+    .where(and(eq(jobPostings.userId, uid), eq(jobPostings.status, "new")));
+
+  let scored = 0;
+  for (const row of rows) {
+    if (await scorePosting(row.id, uid)) scored++;
+  }
+  return scored;
+}
+
+/** Score one posting against the user's profile. No profile means no score —
+ * the badge is simply absent rather than showing a meaningless number. */
+async function scorePosting(postingId: number, userId: string): Promise<boolean> {
+  const [profile] = await db.select().from(userProfiles).where(eq(userProfiles.userId, userId));
+  if (!profile) return false;
+
+  const [extraction] = await db.select().from(jobExtractions).where(eq(jobExtractions.postingId, postingId));
+  if (!extraction) return false;
+
+  try {
+    const { total, breakdown } = await scoreMatch(extraction as JobExtraction, profile);
+    const values = { postingId, userId, total, breakdown, rubricVersion: RUBRIC_VERSION, createdAt: new Date() };
+    await db
+      .insert(matchScores)
+      .values(values)
+      .onConflictDoUpdate({ target: [matchScores.postingId, matchScores.userId], set: values });
+    return true;
+  } catch (e) {
+    console.error(`[inbox] scoring failed for posting ${postingId}:`, e instanceof Error ? e.message : e);
+    return false;
   }
 }

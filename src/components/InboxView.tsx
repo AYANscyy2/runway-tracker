@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import type { InboxCard } from "@/db/schema";
+import type { InboxCard, MatchDimension } from "@/db/schema";
 import {
   dismissPosting,
   ingestPosting,
@@ -12,17 +12,38 @@ import {
   trackPosting,
 } from "@/app/inbox/actions";
 import { compBand, remoteLabel } from "@/lib/inbox/format";
+import { MAX_TOTAL } from "@/lib/inbox/rubric";
 import { countdownLabel, formatDeadline } from "@/lib/dates";
 import { useToast } from "./Toast";
 import { IconChevron } from "./Icons";
 
 type Filter = "open" | "dismissed" | "tracked";
+type Sort = "score" | "newest" | "deadline";
+
+const SORTS: { id: Sort; label: string }[] = [
+  { id: "score", label: "Best match" },
+  { id: "newest", label: "Newest" },
+  { id: "deadline", label: "Deadline" },
+];
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "open", label: "New" },
   { id: "dismissed", label: "Dismissed" },
   { id: "tracked", label: "Tracked" },
 ];
+
+const DIMENSION_LABEL = {
+  stack: "Stack", comp: "Pay", location: "Location", startDate: "Timing", fit: "Fit",
+} as const;
+
+/** Green through amber to red, so the badge reads before the number does. */
+function scoreTint(total: number): string {
+  const ratio = total / MAX_TOTAL;
+  if (ratio >= 0.75) return "var(--color-status-selected)";
+  if (ratio >= 0.5) return "var(--color-status-in-progress)";
+  if (ratio >= 0.3) return "var(--color-status-oa-assignment)";
+  return "var(--color-status-rejected)";
+}
 
 function bucketOf(card: InboxCard): Filter {
   if (card.status === "dismissed") return "dismissed";
@@ -38,6 +59,7 @@ export function InboxView() {
   // in the tracker's payload.
   const [cards, setCards] = useState<InboxCard[] | null>(null);
   const [filter, setFilter] = useState<Filter>("open");
+  const [sort, setSort] = useState<Sort>("score");
   const [input, setInput] = useState("");
   const [isPending, startTransition] = useTransition();
 
@@ -115,7 +137,20 @@ export function InboxView() {
     dismissed: cards?.filter((c) => bucketOf(c) === "dismissed").length ?? 0,
     tracked: cards?.filter((c) => bucketOf(c) === "tracked").length ?? 0,
   };
-  const visible = (cards ?? []).filter((c) => bucketOf(c) === filter);
+  const visible = (cards ?? [])
+    .filter((c) => bucketOf(c) === filter)
+    .sort((a, b) => {
+      if (sort === "score") return (b.score?.total ?? -1) - (a.score?.total ?? -1);
+      if (sort === "deadline") {
+        // Undated postings sort last rather than pretending to be urgent.
+        const ad = a.extraction?.deadline, bd = b.extraction?.deadline;
+        if (!ad && !bd) return 0;
+        if (!ad) return 1;
+        if (!bd) return -1;
+        return ad.localeCompare(bd);
+      }
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 pb-10">
@@ -162,6 +197,15 @@ export function InboxView() {
             </button>
           ))}
         </div>
+
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value as Sort)}
+          aria-label="Sort postings"
+          className="rounded border-2 border-border bg-bg-card px-3 py-2 text-xs font-bold text-ink shadow-hard-1 outline-none"
+        >
+          {SORTS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+        </select>
       </div>
 
       {/* ─── Cards ─── */}
@@ -294,6 +338,16 @@ function PostingCard({
           )}
         </div>
 
+        <div className="flex shrink-0 items-center gap-2">
+          {card.score && (
+            <span
+              title={`${card.score.total} out of ${MAX_TOTAL}`}
+              className="rounded border-2 border-border px-2 py-1 text-sm font-black text-ink shadow-hard-1"
+              style={{ background: scoreTint(card.score.total) }}
+            >
+              {card.score.total}
+            </span>
+          )}
         <button
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
@@ -302,6 +356,7 @@ function PostingCard({
         >
           <IconChevron open={open} className="text-base" />
         </button>
+        </div>
       </div>
 
       {/* ─── Actions ─── */}
@@ -358,6 +413,23 @@ function PostingCard({
       {card.status === "promoted" && (
         <div className="border-t-2 border-border px-4 py-3 text-xs font-bold text-ink-muted">
           In your tracker ✓
+        </div>
+      )}
+
+      {open && card.score && (
+        <div className="border-t-2 border-border px-4 py-3">
+          <p className="mb-2 text-2xs font-extrabold uppercase tracking-wider text-ink-muted">
+            Why {card.score.total}/{MAX_TOTAL}
+          </p>
+          <ul className="flex flex-col gap-1.5">
+            {(Object.entries(card.score.breakdown) as [keyof typeof DIMENSION_LABEL, MatchDimension][]).map(([key, d]) => (
+              <li key={key} className="flex items-baseline gap-2 text-xs">
+                <span className="w-24 shrink-0 font-extrabold text-ink">{DIMENSION_LABEL[key]}</span>
+                <span className="w-12 shrink-0 font-bold tabular-nums text-ink-muted">{d.score}/{d.max}</span>
+                <span className="text-ink-muted">{d.reason}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

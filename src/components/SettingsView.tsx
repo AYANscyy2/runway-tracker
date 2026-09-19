@@ -1,4 +1,7 @@
+"use client";
+
 import { useSession, signOut } from "@/lib/auth-client";
+import { ProfileForm } from "./ProfileForm";
 
 export function SettingsView({
   theme,
@@ -45,6 +48,12 @@ export function SettingsView({
               </button>
             </div>
           </div>
+        </section>
+
+        {/* Match profile — drives Inbox scoring */}
+        <section className="rounded border-2 border-border bg-bg-card p-6 shadow-hard-1">
+          <h3 className="mb-4 text-lg font-bold text-ink">Match profile</h3>
+          <ProfileForm />
         </section>
 
         {/* Account Section */}
