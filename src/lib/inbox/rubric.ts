@@ -1,8 +1,9 @@
 import { google } from "@ai-sdk/google";
 import { generateObject } from "ai";
 import { z } from "zod";
-import type { JobExtraction, MatchBreakdown, UserProfile } from "@/db/schema";
-import { MODEL_ID } from "./extract";
+import { createHash } from "node:crypto";
+import type { JobExtraction, MatchBreakdown, MatchDimension, UserProfile } from "@/db/schema";
+import { MODEL_ID, QuotaError } from "./extract";
 import { convert, isKnownCurrency } from "./currency";
 
 /** Bump when weights or dimension meanings change, so old scores stay readable. */
@@ -107,6 +108,19 @@ function scoreStartDate(e: JobExtraction, p: UserProfile) {
   return { score: max, max, reason: "Open and within your availability." };
 }
 
+/** The fit dimension only depends on these. If none of them changed, the
+ * previous answer is still the right answer — and worth reusing, because a
+ * free-tier key is measured in tens of requests a day. */
+function fitKeyFor(e: JobExtraction, p: UserProfile): string {
+  return createHash("sha1")
+    .update(JSON.stringify([
+      e.role, e.company, e.seniority, e.stack ?? [],
+      p.seniority, p.stack ?? [], p.notes,
+    ]))
+    .digest("hex")
+    .slice(0, 16);
+}
+
 const fitSchema = z.object({
   score: z.number().min(0).max(100).describe("0-100, how well this role suits the candidate beyond the mechanical checks."),
   // Deliberately unconstrained: a length cap here fails the whole response
@@ -117,7 +131,7 @@ const fitSchema = z.object({
 /** The only thing the model is asked: the fuzzy "would this suit them" read
  * that no rule captures. It never sees the other dimensions' scores, so it
  * can't anchor on them. */
-async function scoreFit(e: JobExtraction, p: UserProfile) {
+async function scoreFit(e: JobExtraction, p: UserProfile): Promise<{ dimension: MatchDimension; ok: boolean }> {
   const max = WEIGHTS.fit;
   try {
     const { object } = await generateObject({
@@ -137,30 +151,54 @@ async function scoreFit(e: JobExtraction, p: UserProfile) {
         `What they're looking for: ${p.notes?.trim() || "not stated"}`,
       ].join("\n"),
       temperature: 0,
+      // A 429 needs a 35-second wait, not an immediate retry — the SDK's
+      // default burns three quota units to fail the same way once.
+      maxRetries: 0,
     });
     const reason = object.reason.trim();
     return {
-      score: Math.round((object.score / 100) * max),
-      max,
-      reason: reason.length > 200 ? `${reason.slice(0, 197)}…` : reason,
+      dimension: {
+        score: Math.round((object.score / 100) * max),
+        max,
+        reason: reason.length > 200 ? `${reason.slice(0, 197)}…` : reason,
+      },
+      ok: true,
     };
   } catch (e) {
     // A model outage shouldn't sink the whole score — fall back to neutral and
     // say so, but leave a trace: a silent fallback looks like a real 50%.
     console.warn(`[inbox] fit scoring failed: ${e instanceof Error ? e.message : e}`);
-    return { score: Math.round(max * 0.5), max, reason: "Couldn't assess fit — scored neutral." };
+    const reason = e instanceof QuotaError
+      ? "Fit not assessed — out of free-tier requests. Save your profile again later to fill it in."
+      : "Couldn't assess fit — scored neutral.";
+    return { dimension: { score: Math.round(max * 0.5), max, reason }, ok: false };
   }
 }
 
-export async function scoreMatch(e: JobExtraction, p: UserProfile): Promise<{ total: number; breakdown: MatchBreakdown }> {
-  const [stack, comp, location, startDate, fit] = [
-    scoreStack(e.stack, p.stack),
-    scoreComp(e, p),
-    scoreLocation(e, p),
-    scoreStartDate(e, p),
-    await scoreFit(e, p),
-  ];
-  const breakdown: MatchBreakdown = { stack, comp, location, startDate, fit };
-  const total = Object.values(breakdown).reduce((sum, d) => sum + d.score, 0);
+export async function scoreMatch(
+  e: JobExtraction,
+  p: UserProfile,
+  previous?: MatchBreakdown | null,
+): Promise<{ total: number; breakdown: MatchBreakdown }> {
+  const key = fitKeyFor(e, p);
+  // Every other dimension is pure arithmetic, so it is always recomputed; only
+  // the fit dimension costs a request, and only when its inputs moved.
+  const reusable = previous?.fitKey === key;
+  const scored = reusable ? null : await scoreFit(e, p);
+  const fit = reusable ? previous!.fit : scored!.dimension;
+  // A fit that fell back (outage, quota) is not cached, so the next rescore
+  // tries again rather than freezing a neutral 50% in place forever.
+  const fitKey = reusable || scored!.ok ? key : undefined;
+
+  const breakdown: MatchBreakdown = {
+    stack: scoreStack(e.stack, p.stack),
+    comp: scoreComp(e, p),
+    location: scoreLocation(e, p),
+    startDate: scoreStartDate(e, p),
+    fit,
+    fitKey,
+  };
+  const total = [breakdown.stack, breakdown.comp, breakdown.location, breakdown.startDate, breakdown.fit]
+    .reduce((sum, d) => sum + d.score, 0);
   return { total, breakdown };
 }

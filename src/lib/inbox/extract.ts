@@ -4,18 +4,41 @@ import { PROMPT_VERSION, SYSTEM_PROMPT, extractionSchema, type Extraction } from
 import { checkExtraction, type Violation } from "./validate";
 
 // Overridable so the model can be bumped without a deploy-time code change.
-export const MODEL_ID = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+// Flash-lite by default: the free tier allows far more requests a day than
+// flash, and pulling named fields out of a job description is not a task that
+// needs the larger model.
+export const MODEL_ID = process.env.GEMINI_MODEL ?? "gemini-3.5-flash-lite";
 
 // USD per million tokens. Only used for the cost line in the log — keep it
 // roughly right rather than authoritative.
 const RATES: Record<string, { in: number; out: number }> = {
-  "gemini-2.5-flash": { in: 0.3, out: 2.5 },
+  "gemini-3.5-flash-lite": { in: 0.1, out: 0.4 },
+  "gemini-3.5-flash": { in: 0.3, out: 2.5 },
   "gemini-2.5-flash-lite": { in: 0.1, out: 0.4 },
+  "gemini-2.5-flash": { in: 0.3, out: 2.5 },
   "gemini-2.5-pro": { in: 1.25, out: 10 },
 };
 
 // A very long JD is nearly always boilerplate padding ("about us", legal).
 const MAX_INPUT_CHARS = 24_000;
+
+export class QuotaError extends Error {
+  constructor(cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    const wait = /retry in ([\d.]+)s/i.exec(detail)?.[1];
+    super(
+      wait
+        ? `Google's free tier is out of requests for now — try again in about ${Math.ceil(Number(wait))} seconds.`
+        : "Google's free tier is out of requests for today. It resets on their clock, or you can add billing to the key.",
+    );
+    this.name = "QuotaError";
+  }
+}
+
+function isQuotaError(e: unknown): boolean {
+  const m = e instanceof Error ? `${e.name} ${e.message}` : String(e);
+  return /quota|rate.?limit|RESOURCE_EXHAUSTED|\b429\b/i.test(m);
+}
 
 export type ExtractionResult = {
   extraction: Extraction;
@@ -68,8 +91,14 @@ export async function extractJobDescription(rawText: string): Promise<Extraction
         system: SYSTEM_PROMPT,
         prompt: userPrompt(rawText, violation),
         temperature: 0,
+        // Our own retry loop handles a bad response; the SDK's default retry
+        // just spends quota failing the same way three times.
+        maxRetries: 0,
       });
     } catch (e) {
+      // Out of quota is not something a retry fixes — surface it immediately
+      // with the wait time the API gave us, rather than burning another unit.
+      if (isQuotaError(e)) throw new QuotaError(e);
       // A schema-invalid response on the first attempt is worth one more go;
       // on the second we surface it, since the row is already marked failed.
       if (NoObjectGeneratedError.isInstance(e) && attempt === 1) {

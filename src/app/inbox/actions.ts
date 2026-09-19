@@ -457,8 +457,15 @@ async function scorePosting(postingId: number, userId: string): Promise<boolean>
   const [extraction] = await db.select().from(jobExtractions).where(eq(jobExtractions.postingId, postingId));
   if (!extraction) return false;
 
+  // The previous breakdown carries the fit dimension and the key it was
+  // computed from, so an unchanged fit costs nothing to keep.
+  const [existing] = await db
+    .select({ breakdown: matchScores.breakdown })
+    .from(matchScores)
+    .where(and(eq(matchScores.postingId, postingId), eq(matchScores.userId, userId)));
+
   try {
-    const { total, breakdown } = await scoreMatch(extraction as JobExtraction, profile);
+    const { total, breakdown } = await scoreMatch(extraction as JobExtraction, profile, existing?.breakdown ?? null);
     const values = { postingId, userId, total, breakdown, rubricVersion: RUBRIC_VERSION, createdAt: new Date() };
     await db
       .insert(matchScores)

@@ -264,6 +264,10 @@ export type MatchBreakdown = {
   location: MatchDimension;
   startDate: MatchDimension;
   fit: MatchDimension;
+  /** Hash of the inputs the fit dimension was computed from. Lets a rescore
+   * reuse the stored fit instead of spending another model call when nothing
+   * it depends on has changed. */
+  fitKey?: string;
 };
 
 export type MatchScore = typeof matchScores.$inferSelect;
