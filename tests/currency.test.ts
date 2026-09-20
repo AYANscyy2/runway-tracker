@@ -22,3 +22,12 @@ test("isKnownCurrency guards the same set", () => {
   assert.equal(isKnownCurrency("KRW"), false);
   assert.equal(isKnownCurrency(null), false);
 });
+
+test("each currency has its own annual floor, not one converted threshold", async () => {
+  const { minAnnualFor } = await import("../src/lib/inbox/currency");
+  // A single INR floor converted to USD would be about $1,100 — far too low to
+  // catch a monthly figure passed off as annual.
+  assert.ok(minAnnualFor("USD")! > 10_000);
+  assert.equal(minAnnualFor("INR"), 100_000);
+  assert.equal(minAnnualFor("KRW"), null);
+});

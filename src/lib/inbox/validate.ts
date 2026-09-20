@@ -1,5 +1,5 @@
 import type { Extraction } from "./schema";
-import { MAX_SANE_ANNUAL_INR, MIN_SANE_ANNUAL_INR, convert, isKnownCurrency } from "./currency";
+import { MAX_SANE_ANNUAL_INR, convert, isKnownCurrency, minAnnualFor } from "./currency";
 import { todayIso } from "@/lib/dates";
 
 /**
@@ -18,15 +18,17 @@ export function checkExtraction(e: Extraction, rawText: string): Violation | nul
     return { rule: "comp_inverted", message: `compMin (${e.compMin}) is greater than compMax (${e.compMax}).` };
   }
 
-  // The units check runs for any currency we have a rate for, not just INR: a
-  // "$8,000" that was really per month is the same mistake as an unconverted
-  // LPA figure.
+  // The units check runs for any currency we have a floor for, not just INR:
+  // a "$8,000" that was really per month is the same mistake as an unconverted
+  // LPA figure, but it needs a US-sized floor to be caught.
   const currency = e.compCurrency?.trim().toUpperCase() ?? null;
-  if (currency && isKnownCurrency(currency)) {
+  const floor = currency ? minAnnualFor(currency) : null;
+  if (currency && floor !== null) {
     for (const [field, value] of [["compMin", e.compMin], ["compMax", e.compMax]] as const) {
       if (value === null) continue;
-      const inr = convert(value, currency, "INR");
-      if (inr !== null && (inr < MIN_SANE_ANNUAL_INR || inr > MAX_SANE_ANNUAL_INR)) {
+      const tooHigh = isKnownCurrency(currency)
+        && (convert(value, currency, "INR") ?? 0) > MAX_SANE_ANNUAL_INR;
+      if (value < floor || tooHigh) {
         return {
           rule: "comp_out_of_range",
           message: `${field} is ${value} ${currency}, which is not a believable annual salary. If the posting quotes a monthly, weekly or hourly figure, convert it to an annual one.`,

@@ -33,7 +33,33 @@ export function convert(amount: number, from: string, to: string): number | null
   return Math.round((amount * f) / t);
 }
 
-/** Annual pay below this, expressed in INR, is almost certainly a monthly or
- * hourly figure that wasn't converted. Used as a units sanity check. */
-export const MIN_SANE_ANNUAL_INR = 100_000;
+/**
+ * The lowest believable *annual* salary in each currency, used to catch a
+ * figure that was really monthly or hourly.
+ *
+ * These are per-currency rather than one INR threshold converted, because
+ * converting a single floor makes it wrong nearly everywhere. India's floor
+ * has to sit near ₹1L to allow for real internship stipends — converted, that
+ * is about $1,100, so a "$9,000" that was actually a monthly figure sails
+ * through. Set against local pay instead, each one catches what it should.
+ */
+const MIN_ANNUAL: Record<string, number> = {
+  INR: 100_000,     // a modest internship stipend is genuinely this low
+  USD: 15_000,      // below any US full-time floor
+  EUR: 12_000,
+  GBP: 12_000,
+  AED: 40_000,
+  SGD: 18_000,
+  CAD: 20_000,
+  AUD: 22_000,
+  CHF: 25_000,
+  JPY: 1_500_000,
+};
+
+/** Above this, in INR, the figure is a data-entry error rather than an offer. */
 export const MAX_SANE_ANNUAL_INR = 200_000_000;
+
+/** The floor for a currency, or null when we have no basis for one. */
+export function minAnnualFor(code: string): number | null {
+  return MIN_ANNUAL[code.trim().toUpperCase()] ?? null;
+}

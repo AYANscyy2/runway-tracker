@@ -60,3 +60,16 @@ test("isExpired compares calendar dates", () => {
   assert.equal(isExpired("2099-01-01"), false);
   assert.equal(isExpired(null), false);
 });
+
+test("catches a monthly USD figure, which an INR-derived floor would miss", () => {
+  // $8k/yr is not a US salary; before per-currency floors this passed.
+  assert.equal(rule({ compMin: 8_000, compMax: 9_000, compCurrency: "USD" }), "comp_out_of_range");
+});
+
+test("still allows a genuinely low Indian stipend", () => {
+  assert.equal(rule({ compMin: 120_000, compMax: 150_000, compCurrency: "INR" }), null);
+});
+
+test("a currency with no floor is left alone rather than guessed at", () => {
+  assert.equal(rule({ compMin: 1, compMax: 2, compCurrency: "KRW" }), null);
+});
