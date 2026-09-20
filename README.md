@@ -113,6 +113,28 @@ src/
     constants.ts          # status/type labels, colors, per-type status sets
 ```
 
+## Search
+
+The Inbox search box is hybrid: Postgres full-text over a generated tsvector
+column, and pgvector cosine similarity over per-section embeddings, fused with
+reciprocal rank fusion. Ranks are fused rather than scores, because a
+`ts_rank` and a cosine distance are not on comparable scales.
+
+Two details that matter more than the algorithm:
+
+- **A distance cutoff.** Vector search returns its nearest neighbours however
+  far away they are, so without one, "kubernetes" returns every posting in the
+  inbox ranked by irrelevance. The threshold in `src/lib/inbox/search.ts` was
+  measured against real postings and will need revisiting if the embedding
+  model changes.
+- **Boilerplate filtering.** Job boards surround a posting with nav bars and
+  "similar jobs" rails, which survive HTML-to-text and then match job queries
+  beautifully while being about a different job. `src/lib/inbox/chunk.ts`
+  strips the common offenders; a real readability pass would do better.
+
+Postings added before search existed have no index. The empty-results state
+offers to backfill them.
+
 ## Checks
 
 ```bash

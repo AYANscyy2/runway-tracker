@@ -4,18 +4,21 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { InboxCard, MatchDimension } from "@/db/schema";
 import {
+  backfillSearchIndex,
   dismissPosting,
   ingestPosting,
   listPostings,
   restorePosting,
   retryExtraction,
+  searchPostings,
   trackPosting,
+  type SearchResult,
 } from "@/app/inbox/actions";
 import { compBand, remoteLabel } from "@/lib/inbox/format";
 import { MAX_TOTAL } from "@/lib/inbox/rubric";
 import { countdownLabel, formatDeadline } from "@/lib/dates";
 import { useToast } from "./Toast";
-import { IconChevron } from "./Icons";
+import { IconChevron, IconSearch } from "./Icons";
 import { ManualPostingForm } from "./ManualPostingForm";
 
 type Filter = "open" | "dismissed" | "tracked";
@@ -63,6 +66,9 @@ export function InboxView() {
   const [sort, setSort] = useState<Sort>("score");
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<"paste" | "manual">("paste");
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SearchResult[] | null>(null);
+  const [searching, setSearching] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const load = useCallback(async () => {
@@ -105,6 +111,33 @@ export function InboxView() {
       const res = await retryExtraction(id);
       if (!res.ok) toast.push({ message: res.error, tone: "danger" });
       await load();
+    });
+  }
+
+  function runSearch(q: string) {
+    const trimmed = q.trim();
+    if (!trimmed) { setResults(null); return; }
+    setSearching(true);
+    startTransition(async () => {
+      const res = await searchPostings(trimmed);
+      setSearching(false);
+      if (!res.ok) { toast.push({ message: res.error, tone: "danger", duration: 7000 }); return; }
+      setResults(res.data);
+    });
+  }
+
+  function clearSearch() {
+    setQuery("");
+    setResults(null);
+  }
+
+  function backfill() {
+    startTransition(async () => {
+      const res = await backfillSearchIndex();
+      if (!res.ok) { toast.push({ message: res.error, tone: "danger" }); return; }
+      toast.push({
+        message: res.data > 0 ? `Indexed ${res.data} posting${res.data > 1 ? "s" : ""}` : "Everything is already indexed",
+      });
     });
   }
 
@@ -215,8 +248,40 @@ export function InboxView() {
         )}
       </div>
 
+      {/* ─── Search ─── */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[220px] flex-1">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint">
+            <IconSearch className="text-sm" />
+          </span>
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); runSearch(query); }
+              if (e.key === "Escape") clearSearch();
+            }}
+            placeholder="Search postings — words or meaning, e.g. &quot;owns a service end to end&quot;"
+            className="w-full rounded border-2 border-border bg-bg-card py-2 pl-9 pr-3 text-sm font-medium text-ink shadow-hard-1 outline-none placeholder:text-ink-faint focus:bg-primary-soft"
+          />
+        </div>
+        <button
+          onClick={() => runSearch(query)}
+          disabled={isPending || !query.trim()}
+          className="rounded border-2 border-border bg-primary px-4 py-2 text-xs font-extrabold uppercase tracking-wider text-white shadow-hard-1 btn-push-sm disabled:opacity-50"
+        >
+          {searching ? "Searching…" : "Search"}
+        </button>
+        {results !== null && (
+          <button onClick={clearSearch} className="px-2 py-2 text-xs font-bold text-ink-muted hover:text-ink">
+            Clear
+          </button>
+        )}
+      </div>
+
       {/* ─── Header + filters ─── */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className={`flex-wrap items-center gap-3 ${results === null ? "flex" : "hidden"}`}>
         <div className="flex gap-px overflow-hidden rounded border-2 border-border bg-surface shadow-hard-1">
           {FILTERS.map((f) => (
             <button
@@ -242,7 +307,9 @@ export function InboxView() {
       </div>
 
       {/* ─── Cards ─── */}
-      {cards === null ? (
+      {results !== null ? (
+        <SearchResults results={results} onBackfill={backfill} busy={isPending} />
+      ) : cards === null ? (
         <CardSkeleton />
       ) : visible.length === 0 ? (
         <Empty filter={filter} />
@@ -487,6 +554,61 @@ function PostingCard({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function SearchResults({
+  results, onBackfill, busy,
+}: { results: SearchResult[]; onBackfill: () => void; busy: boolean }) {
+  if (results.length === 0) {
+    return (
+      <div className="rounded-lg border-2 border-dashed border-border px-6 py-12 text-center">
+        <p className="text-sm font-bold text-ink">Nothing matched.</p>
+        <p className="mx-auto mt-1 max-w-sm text-xs text-ink-muted">
+          Postings added before search existed have no index yet.
+        </p>
+        <button
+          onClick={onBackfill}
+          disabled={busy}
+          className="mt-3 rounded border-2 border-border bg-bg-card px-3 py-1.5 text-xs font-extrabold uppercase tracking-wider text-ink shadow-hard-1 btn-push-sm disabled:opacity-50"
+        >
+          Index older postings
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-2xs font-extrabold uppercase tracking-wider text-ink-muted">
+        {results.length} result{results.length > 1 ? "s" : ""}
+      </p>
+      {results.map(({ card, hit }) => {
+        const e = card.extraction;
+        return (
+          <div key={card.id} className="rounded border-2 border-border bg-bg-card p-4 shadow-hard-1">
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="text-sm font-extrabold tracking-tight text-ink">
+                {e?.role ?? "Untitled role"}
+                {e?.company && <span className="font-bold text-ink-muted"> · {e.company}</span>}
+              </h3>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {/* Why this surfaced — a semantic-only hit with no shared words
+                    is otherwise baffling. */}
+                {hit.matchedBy.includes("keyword") && <Pill>words</Pill>}
+                {hit.matchedBy.includes("semantic") && <Pill>meaning</Pill>}
+              </div>
+            </div>
+            {hit.snippet && (
+              <p className="mt-2 line-clamp-3 text-xs text-ink-muted">
+                {hit.section && <span className="font-extrabold uppercase tracking-wider text-ink">{hit.section} · </span>}
+                {hit.snippet}
+              </p>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

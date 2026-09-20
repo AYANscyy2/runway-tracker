@@ -1,10 +1,11 @@
 "use server";
 
 import { createHash } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { headers } from "next/headers";
 import { db } from "@/db";
 import {
+  jobChunks,
   jobExtractions,
   jobPostings,
   matchScores,
@@ -23,6 +24,9 @@ import { extractJobDescription } from "@/lib/inbox/extract";
 import { FetchBlockedError, fetchJobDescription } from "@/lib/inbox/fetch-jd";
 import { RUBRIC_VERSION, scoreMatch } from "@/lib/inbox/rubric";
 import { STUCK_AFTER_MS } from "@/lib/inbox/constants";
+import { chunkJobDescription, embeddableText } from "@/lib/inbox/chunk";
+import { embedTexts } from "@/lib/inbox/embed";
+import { hybridSearch, type SearchHit } from "@/lib/inbox/search";
 import { todayIso } from "@/lib/dates";
 
 async function requireUserId(): Promise<string> {
@@ -151,6 +155,7 @@ async function runExtraction(postingId: number, rawText: string, userId: string)
       .where(eq(jobPostings.id, postingId));
 
     await scorePosting(postingId, userId);
+    await indexPosting(postingId, rawText);
   } catch (err) {
     const message = err instanceof FetchBlockedError || err instanceof Error
       ? err.message
@@ -186,6 +191,38 @@ export async function listPostings(): Promise<ActionResult<InboxCard[]>> {
       score,
     }));
   });
+}
+
+/**
+ * Chunk and embed a posting so it can be searched. Deliberately not part of
+ * the extraction try/catch's failure path: a posting that parsed fine but
+ * could not be embedded is still a perfectly good card, so an indexing failure
+ * is logged and swallowed rather than marking the whole thing failed.
+ */
+async function indexPosting(postingId: number, rawText: string): Promise<void> {
+  try {
+    const chunks = chunkJobDescription(rawText);
+    if (chunks.length === 0) return;
+
+    const embeddings = await embedTexts(chunks.map(embeddableText));
+
+    await db.transaction(async (tx) => {
+      // Replace wholesale: a re-extraction may produce different sections, and
+      // leftover chunks from the previous run would match queries forever.
+      await tx.delete(jobChunks).where(eq(jobChunks.postingId, postingId));
+      await tx.insert(jobChunks).values(
+        chunks.map((c, i) => ({
+          postingId,
+          chunkIndex: i,
+          section: c.section,
+          content: c.content,
+          embedding: embeddings[i] ?? null,
+        })),
+      );
+    });
+  } catch (e) {
+    console.warn(`[inbox] indexing failed for posting ${postingId}:`, e instanceof Error ? e.message : e);
+  }
 }
 
 /**
@@ -495,4 +532,63 @@ async function scorePosting(postingId: number, userId: string): Promise<boolean>
     console.error(`[inbox] scoring failed for posting ${postingId}:`, e instanceof Error ? e.message : e);
     return false;
   }
+}
+
+/* ────────────────────────────── Search ───────────────────────────────── */
+
+export type SearchResult = { card: InboxCard; hit: SearchHit };
+
+/**
+ * Hybrid search across the user's postings. Returns whole cards in fused rank
+ * order, each with the snippet and the engines that matched, so the UI can say
+ * why something surfaced.
+ */
+export async function searchPostings(query: string): Promise<ActionResult<SearchResult[]>> {
+  return run(async () => {
+    const userId = await requireUserId();
+    const hits = await hybridSearch(userId, query);
+    if (hits.length === 0) return [];
+
+    const ids = hits.map((h) => h.postingId);
+    const rows = await db
+      .select({ posting: jobPostings, extraction: jobExtractions, score: matchScores })
+      .from(jobPostings)
+      .leftJoin(jobExtractions, eq(jobExtractions.postingId, jobPostings.id))
+      .leftJoin(
+        matchScores,
+        and(eq(matchScores.postingId, jobPostings.id), eq(matchScores.userId, userId)),
+      )
+      .where(and(eq(jobPostings.userId, userId), inArray(jobPostings.id, ids)));
+
+    const byId = new Map(rows.map((r) => [r.posting.id, r]));
+    // Rebuilt from `hits` rather than `rows` so fused rank order survives.
+    return hits.flatMap((hit) => {
+      const row = byId.get(hit.postingId);
+      if (!row) return [];
+      return [{
+        card: { ...stripRawText(markStuck(row.posting)), extraction: row.extraction, score: row.score },
+        hit,
+      }];
+    });
+  });
+}
+
+/** Index anything that has no chunks yet — postings ingested before search
+ * existed, or ones whose embedding call failed at the time. */
+export async function backfillSearchIndex(): Promise<ActionResult<number>> {
+  return run(async () => {
+    const userId = await requireUserId();
+    const rows = await db
+      .select({ id: jobPostings.id, rawText: jobPostings.rawText })
+      .from(jobPostings)
+      .leftJoin(jobChunks, eq(jobChunks.postingId, jobPostings.id))
+      .where(and(eq(jobPostings.userId, userId), isNull(jobChunks.id)));
+
+    let indexed = 0;
+    for (const row of rows) {
+      await indexPosting(row.id, row.rawText);
+      indexed++;
+    }
+    return indexed;
+  });
 }

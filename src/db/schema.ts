@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, date, pgEnum, integer, boolean, jsonb, unique } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, date, pgEnum, integer, boolean, jsonb, unique, vector, index } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
 	id: text("id").primaryKey(),
@@ -278,3 +278,32 @@ export type InboxCard = JobPosting & {
   extraction: JobExtraction | null;
   score: MatchScore | null;
 };
+
+/**
+ * A posting split into its sections, each embedded for semantic search. Split
+ * by section rather than by a fixed token window: job descriptions are highly
+ * repetitive across companies, so a window that straddles "about us" and
+ * "requirements" produces a vector that matches everything and distinguishes
+ * nothing.
+ *
+ * The `search` tsvector column is generated in the database (see
+ * sql/002_search.sql) so it cannot drift from `content`; Drizzle doesn't model
+ * it, and the search query reaches for it with raw SQL.
+ */
+export const jobChunks = pgTable("job_chunks", {
+  id: serial("id").primaryKey(),
+  postingId: integer("posting_id")
+    .references(() => jobPostings.id, { onDelete: "cascade" })
+    .notNull(),
+  chunkIndex: integer("chunk_index").notNull(),
+  section: text("section").notNull(),
+  content: text("content").notNull(),
+  embedding: vector("embedding", { dimensions: 768 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  unique("job_chunk_posting_index_unique").on(table.postingId, table.chunkIndex),
+  index("job_chunks_posting_idx").on(table.postingId),
+]);
+
+export type JobChunk = typeof jobChunks.$inferSelect;
+export type NewJobChunk = typeof jobChunks.$inferInsert;

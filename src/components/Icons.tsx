@@ -63,6 +63,14 @@ export function IconInbox({ className }: IconProps) {
   );
 }
 
+export function IconSearch({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="11" cy="11" r="7" /><path d="M20 20l-4.3-4.3" />
+    </svg>
+  );
+}
+
 export function IconChevron({ className, open }: IconProps & { open?: boolean }) {
   return (
     <svg {...base} className={`${className ?? ""} transition-transform ${open ? "rotate-90" : ""}`}>
