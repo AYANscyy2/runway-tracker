@@ -2,6 +2,7 @@
 
 import { useSession, signOut } from "@/lib/auth-client";
 import { ProfileForm } from "./ProfileForm";
+import Image from "next/image";
 
 export function SettingsView({
   theme,
@@ -63,15 +64,12 @@ export function SettingsView({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 {session.user.image && (
-                  // Google serves these avatars from a host that varies per
-                  // account; routing them through next/image would need a
-                  // remotePatterns entry that silently breaks the avatar when
-                  // it doesn't match. Not worth it for one 48px image.
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  <Image
                     src={session.user.image}
                     alt={session.user.name || "User"}
-                    className="h-12 w-12 rounded-full border-2 border-border"
+                    width={48}
+                    height={48}
+                    className="h-12 w-12 rounded-full border-2 border-border object-cover"
                   />
                 )}
                 <div>

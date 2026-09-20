@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { signOut, useSession } from "@/lib/auth-client";
+import Image from "next/image";
 
 export function UserMenu({
   theme,
@@ -46,8 +47,7 @@ export function UserMenu({
         className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border-2 border-border bg-bg-card text-sm font-extrabold text-ink shadow-hard-1 btn-push-sm"
       >
         {user?.image ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={user.image} alt="" className="h-full w-full object-cover" />
+          <Image src={user.image} alt="" width={36} height={36} className="h-full w-full object-cover" />
         ) : (
           initial
         )}
