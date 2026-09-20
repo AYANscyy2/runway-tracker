@@ -63,6 +63,11 @@ export function SettingsView({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 {session.user.image && (
+                  // Google serves these avatars from a host that varies per
+                  // account; routing them through next/image would need a
+                  // remotePatterns entry that silently breaks the avatar when
+                  // it doesn't match. Not worth it for one 48px image.
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={session.user.image}
                     alt={session.user.name || "User"}

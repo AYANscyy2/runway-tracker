@@ -85,13 +85,14 @@ export async function updateOpportunity(id: number, input: Partial<OpportunityIn
     const data = validateOpportunityInput(input, { partial: true, currentType: opp.type });
     const { urls, status, referralContact, foundDate, followUpDate, nextAction, notes, ...sharedData } = data;
 
-    const sharedUpdates: Record<string, any> = {};
+    // Drizzle's own insert type, minus the columns this action never sets.
+    const sharedUpdates: Partial<typeof opportunities.$inferInsert> = {};
     if (sharedData.type !== undefined) sharedUpdates.type = sharedData.type;
     if (sharedData.name !== undefined) sharedUpdates.name = sharedData.name;
     if (sharedData.source !== undefined) sharedUpdates.source = sharedData.source;
     if (sharedData.deadline !== undefined) sharedUpdates.deadline = sharedData.deadline;
 
-    const trackingUpdates: Record<string, any> = {};
+    const trackingUpdates: Partial<typeof userOpportunityTracking.$inferInsert> = {};
     if (status !== undefined) trackingUpdates.status = status;
     if (referralContact !== undefined) trackingUpdates.referralContact = referralContact;
     if (foundDate !== undefined) trackingUpdates.foundDate = foundDate;

@@ -3,6 +3,9 @@
 import type { OpportunityWithUrls } from "@/db/schema";
 import { STATUS_COLOR, STATUS_LABEL, deadlineMatters } from "@/lib/constants";
 
+/** One dated thing that needs attention: a deadline or a follow-up. */
+type AgendaRecord = { item: OpportunityWithUrls; type: string; date: Date };
+
 export function NotificationsView({ 
   items, 
   onItemClick 
@@ -13,9 +16,9 @@ export function NotificationsView({
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const overdue: { item: OpportunityWithUrls; type: string; date: Date }[] = [];
-  const todayItems: { item: OpportunityWithUrls; type: string; date: Date }[] = [];
-  const upcoming: { item: OpportunityWithUrls; type: string; date: Date }[] = [];
+  const overdue: AgendaRecord[] = [];
+  const todayItems: AgendaRecord[] = [];
+  const upcoming: AgendaRecord[] = [];
 
   items.forEach(item => {
     if (item.status === "selected" || item.status === "rejected") return;
@@ -42,12 +45,12 @@ export function NotificationsView({
     checkDate(item.followUpDate, "Follow-up");
   });
 
-  const sortFn = (a: any, b: any) => a.date.getTime() - b.date.getTime();
+  const sortFn = (a: AgendaRecord, b: AgendaRecord) => a.date.getTime() - b.date.getTime();
   overdue.sort(sortFn);
   todayItems.sort(sortFn);
   upcoming.sort(sortFn);
 
-  const renderSection = (title: string, records: any[], emptyMessage: string, badgeColor: string) => (
+  const renderSection = (title: string, records: AgendaRecord[], emptyMessage: string, badgeColor: string) => (
     <div className="flex flex-col gap-3 rounded-2xl border-2 border-border bg-bg-card p-4 shadow-hard-2 mb-6">
       <div className="flex items-center gap-2 border-b-2 border-border pb-3">
         <h2 className="text-xl font-extrabold tracking-tighter text-ink uppercase">
