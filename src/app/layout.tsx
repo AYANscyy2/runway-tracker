@@ -64,9 +64,11 @@ export default function RootLayout({
       </head>
       <body className="font-sans antialiased min-h-screen flex flex-col">
         <ToastProvider>
-          <main className="flex-1">
+          {/* Not a <main>: each page supplies its own, and two main landmarks
+              confuse screen readers. */}
+          <div className="flex-1">
             {children}
-          </main>
+          </div>
         </ToastProvider>
       </body>
     </html>

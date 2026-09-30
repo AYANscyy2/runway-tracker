@@ -10,12 +10,12 @@ import {
   STATUS_ORDER,
   TERMINAL_STATUSES,
   deadlineMatters,
-  type Status,
 } from "@/lib/constants";
 import { daysUntil, todayIso } from "@/lib/dates";
-import { deleteOpportunity } from "@/app/actions";
+import { parseQuick, parseStatus, parseType, type QuickFilter } from "@/lib/view-params";
+import { deleteOpportunity, restoreOpportunity, type OpportunityInput } from "@/app/actions";
 import { OpportunityTable } from "./OpportunityTable";
-import { AddEditPanel } from "./AddEditPanel";
+import { AddEditPanel, type NewDefaults } from "./AddEditPanel";
 import { CalendarView } from "./CalendarView";
 import { NotificationsView } from "./NotificationsView";
 import { StatisticsView } from "./StatisticsView";
@@ -25,9 +25,6 @@ import { UserMenu } from "./UserMenu";
 import { useToast } from "./Toast";
 import { IconBell, IconCalendar, IconChart, IconGear, IconGrid, IconInbox } from "./Icons";
 
-type TypeFilter = "all" | "job" | "hackathon";
-type StatusFilter = "all" | Status;
-type QuickFilter = "" | "stale" | "overdue";
 type Tab = "tracker" | "inbox" | "calendar" | "agenda" | "stats" | "settings";
 
 const NAV: { id: Tab; label: string; icon: React.ReactNode }[] = [
@@ -44,6 +41,21 @@ const UNDO_MS = 6000;
 
 type ViewState = { tab: string; type: string; status: string; q: string; quick: string };
 const VIEW_KEYS = ["tab", "type", "status", "q", "quick"] as const;
+
+type StripId = "overdue" | "stale" | "review";
+const STRIP_KEY = "runway-strip-dismissed";
+
+/** Which strip lines were dismissed today. Stored with the date so they come
+ * back tomorrow; each line is dismissed on its own so hiding the review
+ * reminder doesn't also hide the overdue warning. */
+function readDismissed(): StripId[] {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(STRIP_KEY) ?? "null");
+    return raw && raw.date === todayIso() && Array.isArray(raw.ids) ? raw.ids : [];
+  } catch {
+    return [];
+  }
+}
 
 export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] }) {
   const params = useSearchParams();
@@ -67,36 +79,55 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
   }, []);
 
   const activeTab: Tab = TABS.includes(view.tab as Tab) ? (view.tab as Tab) : "tracker";
-  const typeFilter = (view.type as TypeFilter) || "all";
-  const statusFilter = (view.status as StatusFilter) || "all";
+  const typeFilter = parseType(view.type);
+  const statusFilter = parseStatus(view.status, typeFilter);
+  const quick = parseQuick(view.quick);
+  const statusOptions = typeFilter === "all" ? STATUS_ORDER : STATUS_FOR_TYPE[typeFilter];
   const searchQuery = view.q;
-  const quick = (view.quick as QuickFilter) || "";
   const searchRef = useRef<HTMLInputElement>(null);
+  // "/" from another tab switches to the tracker; the search box only exists
+  // once that render commits, so focusing waits for it.
+  const [focusSearch, setFocusSearch] = useState(0);
+  useEffect(() => {
+    if (focusSearch && activeTab === "tracker") searchRef.current?.focus();
+  }, [focusSearch, activeTab]);
 
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [panel, setPanel] = useState<OpportunityWithUrls | "new" | null>(null);
+  const [newDefaults, setNewDefaults] = useState<NewDefaults | undefined>(undefined);
+  const openNew = useCallback((defaults?: NewDefaults) => {
+    setNewDefaults(defaults);
+    setPanel("new");
+  }, []);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [dismissedStrip, setDismissedStrip] = useState(false);
+  const [dismissedStrip, setDismissedStrip] = useState<StripId[]>([]);
   const [isReviewDay, setIsReviewDay] = useState(false);
-  // Sampled once on mount rather than read during render: staleness only turns
-  // over daily, so a clock reading per render buys nothing and makes the
-  // render impure.
+  // Sampled rather than read during render: staleness only turns over daily,
+  // so a clock reading per render buys nothing and makes the render impure.
   const [nowMs, setNowMs] = useState<number | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Set<number>>(new Set());
-  const deleteTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
   // Everything the server can't know: the theme the pre-paint script chose,
-  // whether today's strip was already dismissed, and today's weekday. All of
-  // it has to be read after hydration, so one mount effect rather than three.
-  /* eslint-disable react-hooks/set-state-in-effect -- reading browser-only state on mount is the point of this effect */
+  // which strip lines were dismissed today, and today's weekday. Re-read when
+  // the tab comes back into view, so a tab left open overnight moves on to
+  // the new day instead of keeping yesterday's dismissals and staleness.
+  /* eslint-disable react-hooks/set-state-in-effect -- reading browser-only state after hydration is the point of this effect */
   useEffect(() => {
     const t = document.documentElement.getAttribute("data-theme");
     if (t === "dark" || t === "light") setTheme(t);
-    try {
-      setDismissedStrip(window.localStorage.getItem("runway-strip-dismissed") === todayIso());
-    } catch {}
-    setIsReviewDay([2, 4].includes(new Date().getDay()));
-    setNowMs(Date.now());
+    const sample = () => {
+      setDismissedStrip(readDismissed());
+      setIsReviewDay([2, 4].includes(new Date().getDay()));
+      setNowMs(Date.now());
+    };
+    sample();
+    const onVisible = () => { if (document.visibilityState === "visible") sample(); };
+    document.addEventListener("visibilitychange", onVisible);
+    const hourly = setInterval(sample, 60 * 60 * 1000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      clearInterval(hourly);
+    };
   }, []);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -106,9 +137,10 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
     try { window.localStorage.setItem("runway-theme", t); } catch {}
   }, []);
 
-  function dismissStrip() {
-    setDismissedStrip(true);
-    try { window.localStorage.setItem("runway-strip-dismissed", todayIso()); } catch {}
+  function dismissStripLine(id: StripId) {
+    const next = [...new Set([...readDismissed(), id])];
+    setDismissedStrip(next);
+    try { window.localStorage.setItem(STRIP_KEY, JSON.stringify({ date: todayIso(), ids: next })); } catch {}
   }
 
   // ── Derived sets ─────────────────────────────────────────────────
@@ -128,22 +160,23 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
   }, [visible, nowMs]);
 
   const overdueItems = useMemo(
-    () => visible.filter((i) => deadlineMatters(i.type, i.status) && (daysUntil(i.deadline) ?? 1) < 0),
-    [visible],
+    // nowMs is a dependency so a new day recomputes this; daysUntil reads the clock itself.
+    () => nowMs === null ? [] : visible.filter((i) => deadlineMatters(i.type, i.status) && (daysUntil(i.deadline) ?? 1) < 0),
+    [visible, nowMs],
   );
 
   const agendaCount = useMemo(
-    () =>
+    () => nowMs === null ? 0 :
       visible.filter((i) => {
         if (TERMINAL_STATUSES.includes(i.status)) return false;
         const d = deadlineMatters(i.type, i.status) ? daysUntil(i.deadline) : null;
         const f = daysUntil(i.followUpDate);
         return (d !== null && d <= 0) || (f !== null && f <= 0);
       }).length,
-    [visible],
+    [visible, nowMs],
   );
 
-  const statusOptions = typeFilter === "all" ? STATUS_ORDER : STATUS_FOR_TYPE[typeFilter];
+  const isFiltered = Boolean(searchQuery.trim() || typeFilter !== "all" || statusFilter !== "all" || quick);
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -152,7 +185,9 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
       .filter((i) => statusFilter === "all" || i.status === statusFilter)
       .filter((i) => {
         if (!q) return true;
-        return [i.name, i.source, i.referralContact, i.nextAction, i.notes]
+        // Includes what Track copies from the Inbox, so "golang" or
+        // "backend" finds a promoted entry.
+        return [i.name, i.role, i.location, i.source, i.referralContact, i.nextAction, i.notes, ...(i.stack ?? [])]
           .some((v) => v?.toLowerCase().includes(q));
       })
       .filter((i) => {
@@ -163,32 +198,65 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
   }, [visible, typeFilter, statusFilter, searchQuery, quick, staleItems, overdueItems]);
 
   // ── Delete with undo ─────────────────────────────────────────────
+  // Saved immediately (a soft delete) and hidden optimistically; Undo restores
+  // it. Deleting only once the toast expired lost the delete on a reload.
+  const unhide = useCallback((id: number) => {
+    setPendingDelete((s) => { const n = new Set(s); n.delete(id); return n; });
+  }, []);
+
   const requestDelete = useCallback((item: OpportunityWithUrls) => {
     setPendingDelete((s) => new Set(s).add(item.id));
     setPanel(null);
-    const timer = setTimeout(async () => {
-      deleteTimers.current.delete(item.id);
+    void (async () => {
       const res = await deleteOpportunity(item.id);
       if (!res.ok) {
-        setPendingDelete((s) => { const n = new Set(s); n.delete(item.id); return n; });
+        unhide(item.id);
         toast.push({ message: `Couldn't delete: ${res.error}`, tone: "danger" });
+        return;
       }
-    }, UNDO_MS);
-    deleteTimers.current.set(item.id, timer);
-    toast.push({
-      message: `Removed ${item.name}`,
-      duration: UNDO_MS,
-      action: {
-        label: "Undo",
-        onClick: () => {
-          const t = deleteTimers.current.get(item.id);
-          if (t) clearTimeout(t);
-          deleteTimers.current.delete(item.id);
-          setPendingDelete((s) => { const n = new Set(s); n.delete(item.id); return n; });
+      toast.push({
+        message: `Removed ${item.name}`,
+        duration: UNDO_MS,
+        action: {
+          label: "Undo",
+          onClick: async () => {
+            const undo = await restoreOpportunity(item.id);
+            if (undo.ok) unhide(item.id);
+            else toast.push({ message: `Couldn't restore: ${undo.error}`, tone: "danger" });
+          },
         },
-      },
+      });
+    })();
+  }, [toast, unhide]);
+
+  // Once the server's list no longer has a deleted row, stop tracking it —
+  // and if Undo brought it back, it must not stay hidden.
+  const liveIds = useMemo(() => new Set(initialData.map((i) => i.id)), [initialData]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- pruning local state against fresh server data
+    setPendingDelete((s) => {
+      const n = new Set([...s].filter((id) => liveIds.has(id)));
+      return n.size === s.size ? s : n;
     });
-  }, [toast]);
+  }, [liveIds]);
+
+  /** A new entry the current filters would hide gets a way to see it. */
+  const onSaved = useCallback((payload: OpportunityInput, isEdit: boolean) => {
+    const q = searchQuery.trim().toLowerCase();
+    const hidden = !isEdit && (
+      (typeFilter !== "all" && payload.type !== typeFilter) ||
+      (statusFilter !== "all" && payload.status !== statusFilter) ||
+      quick !== "" ||
+      (q !== "" && ![payload.name, payload.source, payload.referralContact, payload.nextAction, payload.notes].some((v) => v?.toLowerCase().includes(q)))
+    );
+    toast.push(hidden
+      ? {
+          message: `Added ${payload.name} — hidden by your filters`,
+          action: { label: "Show all", onClick: () => setParams({ q: "", type: "", status: "", quick: "" }) },
+          duration: 6000,
+        }
+      : { message: isEdit ? `Saved ${payload.name}` : `Added ${payload.name}` });
+  }, [toast, searchQuery, typeFilter, statusFilter, quick, setParams]);
 
   // ── Keyboard shortcuts ───────────────────────────────────────────
   useEffect(() => {
@@ -197,31 +265,45 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
       const tag = (e.target as HTMLElement)?.tagName;
       if (["INPUT", "TEXTAREA", "SELECT"].includes(tag) || (e.target as HTMLElement)?.isContentEditable) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "n") { e.preventDefault(); setPanel("new"); }
-      if (e.key === "/") { e.preventDefault(); setParams({ tab: "" }); searchRef.current?.focus(); }
+      if (e.key === "n") { e.preventDefault(); openNew(); }
+      if (e.key === "/") { e.preventDefault(); setParams({ tab: "" }); setFocusSearch((n) => n + 1); }
+      // 1–6 jump straight to a tab, in sidebar order.
+      const idx = Number(e.key) - 1;
+      if (Number.isInteger(idx) && idx >= 0 && idx < TABS.length) {
+        e.preventDefault();
+        setParams({ tab: TABS[idx] === "tracker" ? "" : TABS[idx] });
+      }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [panel, setParams]);
+  }, [panel, setParams, openNew]);
 
   const goTab = (t: Tab) => setParams({ tab: t === "tracker" ? "" : t });
 
-  const stripLines: { text: string; cta?: { label: string; onClick: () => void } }[] = [];
+  // The quick filters replace any other filter: "Clean up" with a status
+  // filter still set would land on an empty table.
+  const showOnly = (q: QuickFilter) => setParams({ tab: "", quick: q, q: "", type: "", status: "" });
+
+  const stripLines: { id: StripId; text: string; cta?: { label: string; onClick: () => void } }[] = [];
   if (overdueItems.length > 0)
     stripLines.push({
+      id: "overdue",
       text: `${overdueItems.length} deadline${overdueItems.length > 1 ? "s have" : " has"} passed — update their status or drop them.`,
-      cta: { label: "Clean up", onClick: () => setParams({ tab: "", quick: "overdue" }) },
+      cta: { label: "Clean up", onClick: () => showOnly("overdue") },
     });
   if (staleItems.length > 0)
     stripLines.push({
+      id: "stale",
       text: `${staleItems.length} application${staleItems.length > 1 ? "s haven't" : " hasn't"} moved in ${STALE_AFTER_DAYS} days.`,
-      cta: { label: "Review", onClick: () => setParams({ tab: "", quick: "stale" }) },
+      cta: { label: "Review", onClick: () => showOnly("stale") },
     });
   if (isReviewDay)
     stripLines.push({
-      text: `It's ${new Date().toLocaleDateString("en", { weekday: "long" })} — time for your weekly runway review.`,
+      id: "review",
+      text: `It's ${new Date().toLocaleDateString("en", { weekday: "long" })} — a review day. Go through what's due and what's gone quiet.`,
       cta: { label: "Open agenda", onClick: () => goTab("agenda") },
     });
+  const shownStrip = stripLines.filter((l) => !dismissedStrip.includes(l.id));
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg">
@@ -254,7 +336,7 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
           </div>
 
           <button
-            onClick={() => setPanel("new")}
+            onClick={() => openNew()}
             title="Log opportunity (n)"
             className={`mb-6 rounded border-2 border-border bg-primary font-bold text-white shadow-hard-1 btn-push ${
               sidebarOpen ? "w-full px-3 py-2 text-sm" : "flex h-8 w-8 items-center justify-center text-base"
@@ -310,23 +392,23 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
         </div>
 
         {/* One attention strip instead of stacked banners */}
-        {activeTab === "tracker" && stripLines.length > 0 && !dismissedStrip && (
+        {activeTab === "tracker" && shownStrip.length > 0 && (
           <div className="mb-4 rounded border-2 border-border bg-tertiary-soft px-4 py-2.5 shadow-hard-1-muted">
-            <div className="flex items-start justify-between gap-3">
-              <ul className="flex flex-col gap-1.5 text-sm font-bold text-ink">
-                {stripLines.map((l) => (
-                  <li key={l.text} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <ul className="flex flex-col gap-1.5 text-sm font-bold text-ink">
+              {shownStrip.map((l) => (
+                <li key={l.id} className="flex items-start justify-between gap-3">
+                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                     <span>{l.text}</span>
                     {l.cta && (
                       <button onClick={l.cta.onClick} className="text-xs font-extrabold uppercase tracking-wider text-primary underline hover:no-underline">
                         {l.cta.label} →
                       </button>
                     )}
-                  </li>
-                ))}
-              </ul>
-              <button onClick={dismissStrip} aria-label="Dismiss for today" className="font-bold text-ink-muted hover:text-ink">×</button>
-            </div>
+                  </span>
+                  <button onClick={() => dismissStripLine(l.id)} aria-label="Dismiss for today" title="Dismiss for today" className="font-bold text-ink-muted hover:text-ink">×</button>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 
@@ -339,6 +421,11 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
                 placeholder="Search name, source, notes…  ( / )"
                 value={searchQuery}
                 onChange={(e) => setParams({ q: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key !== "Escape") return;
+                  if (searchQuery) setParams({ q: "" });
+                  else e.currentTarget.blur();
+                }}
                 className="min-w-[200px] flex-1 rounded border-2 border-border bg-bg-card px-3 py-2 text-sm font-medium text-ink shadow-hard-2 outline-none placeholder:text-ink-faint focus:bg-primary-soft"
               />
 
@@ -379,22 +466,34 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
                   {quick === "stale" ? "Stale only" : "Overdue only"} ×
                 </button>
               )}
+
+              {isFiltered && visible.length > 0 && (
+                <span className="text-xs font-bold text-ink-muted">
+                  {filtered.length} of {visible.length}
+                  <button
+                    onClick={() => setParams({ q: "", type: "", status: "", quick: "" })}
+                    className="ml-2 font-extrabold text-primary underline hover:no-underline"
+                  >
+                    Clear
+                  </button>
+                </span>
+              )}
             </div>
 
             <OpportunityTable
               items={filtered}
               totalCount={visible.length}
               onEdit={(item) => setPanel(item)}
-              onAdd={() => setPanel("new")}
+              onAdd={() => openNew()}
               onClearFilters={() => setParams({ q: "", type: "", status: "", quick: "" })}
             />
           </>
         )}
 
-        {activeTab === "inbox" && <InboxView />}
-        {activeTab === "calendar" && <CalendarView items={visible} onItemClick={(item) => setPanel(item)} onAdd={() => setPanel("new")} />}
+        {activeTab === "inbox" && <InboxView onOpenSettings={() => goTab("settings")} onOpenTracker={() => goTab("tracker")} />}
+        {activeTab === "calendar" && <CalendarView items={visible} onItemClick={(item) => setPanel(item)} onAdd={() => openNew()} onDayClick={(iso) => openNew({ deadline: iso })} />}
         {activeTab === "agenda" && <NotificationsView items={visible} onItemClick={(item) => setPanel(item)} />}
-        {activeTab === "stats" && <StatisticsView items={visible} onAdd={() => setPanel("new")} />}
+        {activeTab === "stats" && <StatisticsView items={visible} onAdd={() => openNew()} />}
         {activeTab === "settings" && <SettingsView theme={theme} setTheme={applyTheme} />}
       </main>
 
@@ -426,7 +525,7 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
 
       {/* The sidebar's "+ Log opportunity" has nowhere to live on a phone. */}
       <button
-        onClick={() => setPanel("new")}
+        onClick={() => openNew()}
         aria-label="Log opportunity"
         className="fixed bottom-20 right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full border-2 border-border bg-primary text-2xl font-extrabold text-white shadow-hard-2 btn-push md:hidden"
       >
@@ -436,8 +535,10 @@ export function Dashboard({ initialData }: { initialData: OpportunityWithUrls[] 
       {panel && (
         <AddEditPanel
           editing={panel}
+          defaults={panel === "new" ? newDefaults : undefined}
           onClose={() => setPanel(null)}
           onDelete={requestDelete}
+          onSaved={onSaved}
         />
       )}
     </div>

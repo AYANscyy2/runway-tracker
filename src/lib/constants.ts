@@ -54,9 +54,18 @@ export const STALE_AFTER_DAYS = 14;
 /**
  * A deadline is only actionable while you still have to act on it. For a job
  * that's the application deadline — once you've applied it's moot. For a
- * hackathon the date is the event itself, so it matters until it's decided.
+ * hackathon it's the submission deadline (what the Inbox fills in), which
+ * matters until you're in the event: once it's "hackathon active" you've
+ * registered and submitted, and the date passing isn't something to clean up.
  */
 export function deadlineMatters(type: OppType, status: Status): boolean {
   if (TERMINAL_STATUSES.includes(status)) return false;
-  return type === "hackathon" || status === "found";
+  if (type === "hackathon") return status === "found" || status === "applied";
+  return status === "found";
 }
+
+/** What the single date field means for each type. */
+export const DEADLINE_LABEL: Record<OppType, string> = {
+  job: "Deadline",
+  hackathon: "Submission deadline",
+};

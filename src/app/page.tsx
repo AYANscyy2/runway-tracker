@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { opportunities, opportunityUrls, userOpportunityTracking } from "@/db/schema";
 import { Dashboard } from "@/components/Dashboard";
@@ -28,7 +28,7 @@ export default async function Home({
 
   if (!session) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen gap-4 text-center px-4">
+      <main className="flex flex-col items-center justify-center min-h-screen gap-4 text-center px-4">
         {error && (
           <div className="bg-red-500/10 border border-red-500/50 text-red-500 px-6 py-4 rounded-lg max-w-md w-full mb-4">
             <h3 className="font-bold text-lg mb-1">Authentication Error</h3>
@@ -41,7 +41,7 @@ export default async function Home({
         <div className="mt-2">
           <AuthButton />
         </div>
-      </div>
+      </main>
     );
   }
 
@@ -49,7 +49,7 @@ export default async function Home({
   const allOpps = await db
     .select()
     .from(opportunities)
-    .where(eq(opportunities.createdBy, session.user.id))
+    .where(and(eq(opportunities.createdBy, session.user.id), isNull(opportunities.deletedAt)))
     .orderBy(desc(opportunities.createdAt));
 
   if (allOpps.length === 0) {
@@ -90,7 +90,7 @@ export default async function Home({
       nextAction: tracking?.nextAction ?? null,
       notes: tracking?.notes ?? null,
       trackingId: tracking?.id ?? null,
-      trackedAt: tracking?.updatedAt ?? null,
+      trackedAt: tracking?.statusChangedAt ?? null,
       urls: urlsByOppId[opp.id] || [],
     };
   });

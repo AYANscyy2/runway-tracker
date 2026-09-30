@@ -11,10 +11,13 @@ export function CalendarView({
   items,
   onItemClick,
   onAdd,
+  onDayClick,
 }: {
   items: OpportunityWithUrls[];
   onItemClick?: (item: OpportunityWithUrls) => void;
   onAdd?: () => void;
+  /** Called with YYYY-MM-DD when an empty part of a day cell is clicked. */
+  onDayClick?: (iso: string) => void;
 }) {
   const [currentDate, setCurrentDate] = useState(() => {
     const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -34,8 +37,10 @@ export function CalendarView({
 
   const monthLabel = currentDate.toLocaleDateString("en", { month: "long", year: "numeric" });
 
+  const isoFor = (day: number) => `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+
   const getEntriesForDay = (day: number): DayEntry[] => {
-    const target = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const target = isoFor(day);
     const out: DayEntry[] = [];
     for (const item of items) {
       if (item.deadline?.startsWith(target)) out.push({ item, kind: "deadline" });
@@ -65,6 +70,7 @@ export function CalendarView({
         <div className="flex items-center gap-4 text-2xs font-bold text-ink-muted">
           <span className="inline-flex items-center gap-1"><IconFlag className="text-danger" /> Deadline</span>
           <span className="inline-flex items-center gap-1"><IconReply className="text-secondary" /> Follow-up</span>
+          {onDayClick && <span className="hidden sm:inline">Click a day to log one</span>}
         </div>
       </div>
 
@@ -99,9 +105,21 @@ export function CalendarView({
           return (
             <div
               key={day}
+              // Entries are buttons and stop propagation, so this only fires
+              // on the empty part of the cell.
+              onClick={onDayClick ? () => onDayClick(isoFor(day)) : undefined}
+              // Reachable from the keyboard too, not just by pointer.
+              role={onDayClick ? "button" : undefined}
+              tabIndex={onDayClick ? 0 : undefined}
+              aria-label={onDayClick ? `Log an opportunity due ${isoFor(day)}` : undefined}
+              onKeyDown={onDayClick ? (e) => {
+                if (e.target !== e.currentTarget) return;
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onDayClick(isoFor(day)); }
+              } : undefined}
+              title={onDayClick ? "Log an opportunity due this day" : undefined}
               className={`flex min-h-[72px] flex-col gap-1 rounded border-2 p-1.5 sm:min-h-[110px] sm:p-2 ${
                 isToday ? "border-primary bg-primary/10" : "border-border bg-bg-card shadow-hard-1"
-              }`}
+              } ${onDayClick ? "cursor-pointer hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-primary" : ""}`}
             >
               <div className={`text-right text-xs font-bold sm:text-sm ${isToday ? "text-primary" : "text-ink-muted"}`}>
                 {day}
@@ -110,7 +128,7 @@ export function CalendarView({
                 {entries.map(({ item, kind }) => (
                   <button
                     key={`${item.id}-${kind}`}
-                    onClick={() => onItemClick?.(item)}
+                    onClick={(e) => { e.stopPropagation(); onItemClick?.(item); }}
                     className="flex items-center gap-1 truncate rounded border-2 border-border px-1.5 py-0.5 text-left text-[10px] font-bold text-[#1c1b1b] shadow-sm transition-opacity hover:opacity-75 dark:text-ink"
                     style={{ backgroundColor: STATUS_COLOR[item.status] }}
                     title={`${item.name} — ${kind === "deadline" ? "deadline" : "follow-up"}`}

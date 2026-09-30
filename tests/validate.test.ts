@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkExtraction, isExpired } from "../src/lib/inbox/validate";
+import { checkExtraction, isExpired, normalizeExtraction } from "../src/lib/inbox/validate";
 import type { Extraction } from "../src/lib/inbox/schema";
 
 const base: Extraction = {
-  role: "Backend Engineer", company: "Acme", stack: [],
-  compMin: null, compMax: null, compCurrency: null,
-  location: null, remote: "unclear", deadline: null, seniority: null,
+  kind: "job", role: "Backend Engineer", company: "Acme", eventName: null, stack: [],
+  compMin: null, compMax: null, compCurrency: null, prizeAmount: null, prizeCurrency: null,
+  location: null, remote: "unclear", deadline: null, startsOn: null, endsOn: null,
+  teamSizeMax: null, eligibility: null, themes: [], seniority: null,
 };
 const rule = (e: Partial<Extraction>, text = "text") => checkExtraction({ ...base, ...e }, text)?.rule ?? null;
 
@@ -72,4 +73,47 @@ test("still allows a genuinely low Indian stipend", () => {
 
 test("a currency with no floor is left alone rather than guessed at", () => {
   assert.equal(rule({ compMin: 1, compMax: 2, compCurrency: "KRW" }), null);
+});
+
+test("a 'job' read off a hackathon site is sent back", () => {
+  const e = { ...base, role: null };
+  assert.equal(checkExtraction(e, "text", "https://amazonappdev2026.devpost.com/rules")?.rule, "kind_mismatch");
+});
+
+test("a 'job' whose text is plainly a hackathon is sent back", () => {
+  const text = "Join the hackathon! Hackathon rules. Hackathon prizes and judging criteria below.";
+  assert.equal(rule({ role: null }, text), "kind_mismatch");
+});
+
+test("a job ad that mentions hackathons in passing is left alone", () => {
+  assert.equal(rule({}, "We run an internal hackathon every quarter."), null);
+});
+
+test("a hackathon's prize reported as pay is moved to the prize", () => {
+  const n = normalizeExtraction({ ...base, kind: "hackathon", role: "x", compMin: 50_000, compMax: 50_000, compCurrency: "usd" });
+  assert.equal(n.compMin, null);
+  assert.equal(n.role, null);
+  assert.equal(n.prizeAmount, 50_000);
+  assert.equal(n.prizeCurrency, "USD");
+});
+
+test("a job never keeps hackathon-only fields", () => {
+  const n = normalizeExtraction({ ...base, eventName: "Stray", prizeAmount: 10, themes: ["ai"] });
+  assert.equal(n.eventName, null);
+  assert.equal(n.prizeAmount, null);
+  assert.deepEqual(n.themes, []);
+});
+
+test("'online' supports remote for a hackathon", () => {
+  assert.equal(rule({ kind: "hackathon", role: null, remote: "remote" }, "This is an online event."), null);
+});
+
+test("a rolled-over date like Feb 31 is caught", () => {
+  assert.equal(rule({ deadline: "2026-02-31" }), "deadline_unparseable");
+  assert.equal(rule({ kind: "hackathon", role: null, endsOn: "2026-04-31" }), "deadline_unparseable");
+});
+
+test("an online hackathon drops the sponsor address it picked up as a location", () => {
+  const n = normalizeExtraction({ ...base, kind: "hackathon", remote: "remote", location: "Seattle, Washington" });
+  assert.equal(n.location, null);
 });

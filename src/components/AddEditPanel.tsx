@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
-import { STATUS_FOR_TYPE, STATUS_LABEL, TYPE_LABEL, type Status } from "@/lib/constants";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { DEADLINE_LABEL, STATUS_FOR_TYPE, STATUS_LABEL, TYPE_LABEL, type Status } from "@/lib/constants";
 import type { OpportunityWithUrls } from "@/db/schema";
 import { createOpportunity, updateOpportunity, type OpportunityInput } from "@/app/actions";
 import { useToast } from "./Toast";
@@ -23,13 +23,15 @@ type FormState = {
 
 type Errors = Partial<Record<"name" | "deadline", string>> & { urls?: Record<number, string> };
 
-function toFormState(o?: OpportunityWithUrls | null): FormState {
+export type NewDefaults = { deadline?: string };
+
+function toFormState(o?: OpportunityWithUrls | null, defaults?: NewDefaults): FormState {
   return {
     type: o?.type ?? "job",
     name: o?.name ?? "",
     source: o?.source ?? "",
     urls: o?.urls?.length ? o.urls.map((u) => ({ label: u.label, url: u.url })) : [{ label: "", url: "" }],
-    deadline: o?.deadline ? String(o.deadline).slice(0, 10) : "",
+    deadline: o?.deadline ? String(o.deadline).slice(0, 10) : defaults?.deadline ?? "",
     status: o?.status ?? "found",
     referralContact: o?.referralContact ?? "",
     foundDate: o?.foundDate ? String(o.foundDate).slice(0, 10) : todayIso(),
@@ -42,30 +44,101 @@ function toFormState(o?: OpportunityWithUrls | null): FormState {
 const inputCls =
   "rounded border-2 border-border bg-bg-card px-3 py-2 text-sm font-medium text-ink shadow-hard-1 outline-none placeholder:text-ink-faint focus:bg-primary-soft aria-[invalid=true]:border-danger";
 
+/** YYYY-MM-DD for today plus N days, on the local calendar like todayIso. */
+function isoInDays(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+const FOLLOW_UP_PRESETS: { label: string; days: number }[] = [
+  { label: "+3d", days: 3 },
+  { label: "+1w", days: 7 },
+  { label: "+2w", days: 14 },
+];
+
 const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+/**
+ * On edit, only what actually changed is sent. Sending the whole form wrote
+ * back whatever status the form opened with — undoing a status change made
+ * inline in the table while the panel was open — and touched every field.
+ */
+function changedFields(payload: OpportunityInput, initial: OpportunityInput): Partial<OpportunityInput> {
+  const out: Partial<OpportunityInput> = {};
+  for (const key of Object.keys(payload) as (keyof OpportunityInput)[]) {
+    if (JSON.stringify(payload[key]) !== JSON.stringify(initial[key])) {
+      (out as Record<string, unknown>)[key] = payload[key];
+    }
+  }
+  // A type change can invalidate the status; send the status alongside so the
+  // server can check the pair.
+  if (out.type !== undefined) out.status = payload.status;
+  return out;
+}
+
+function toPayload(form: FormState): OpportunityInput {
+  return {
+    type: form.type,
+    name: form.name.trim(),
+    source: form.source.trim() || null,
+    urls: form.urls.filter((u) => u.url.trim()).map((u) => ({ label: u.label.trim(), url: u.url.trim() })),
+    deadline: form.deadline || null,
+    status: form.status,
+    referralContact: form.referralContact.trim() || null,
+    foundDate: form.foundDate || null,
+    followUpDate: form.followUpDate || null,
+    nextAction: form.nextAction.trim() || null,
+    notes: form.notes.trim() || null,
+  };
+}
 
 export function AddEditPanel({
   editing,
+  defaults,
   onClose,
   onDelete,
+  onSaved,
 }: {
   editing: OpportunityWithUrls | "new";
+  /** Prefills for a new entry, e.g. the calendar day that was clicked. */
+  defaults?: NewDefaults;
   onClose: () => void;
   onDelete: (item: OpportunityWithUrls) => void;
+  /** Called after a successful save instead of the default toast. */
+  onSaved?: (payload: OpportunityInput, isEdit: boolean) => void;
 }) {
   const toast = useToast();
   const isEdit = editing !== "new";
-  const [form, setForm] = useState<FormState>(() => toFormState(isEdit ? editing : null));
+  const [initial] = useState<FormState>(() => toFormState(isEdit ? editing : null, defaults));
+  const [form, setForm] = useState<FormState>(initial);
   const [errors, setErrors] = useState<Errors>({});
   const [isPending, startTransition] = useTransition();
   const dialogRef = useRef<HTMLFormElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
+  // Escape, the backdrop and Cancel all route through here so a half-typed
+  // entry isn't lost to a stray click.
+  const formRef = useRef(form);
+  useEffect(() => { formRef.current = form; }, [form]);
+  const requestClose = useCallback(() => {
+    const dirty = JSON.stringify(formRef.current) !== JSON.stringify(initial);
+    if (dirty && !window.confirm("Discard your unsaved changes?")) return;
+    onClose();
+  }, [onClose, initial]);
+
+  // The page behind the dialog shouldn't scroll on a phone.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   useEffect(() => {
     nameInputRef.current?.focus();
     const dialog = dialogRef.current;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") { onClose(); return; }
+      if (e.key === "Escape") { requestClose(); return; }
       // Minimal focus trap: keep Tab cycling inside the dialog.
       if (e.key === "Tab" && dialog) {
         const nodes = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE));
@@ -77,7 +150,7 @@ export function AddEditPanel({
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [requestClose]);
 
   function field<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -114,27 +187,18 @@ export function AddEditPanel({
       return;
     }
 
-    const payload: OpportunityInput = {
-      type: form.type,
-      name: form.name.trim(),
-      source: form.source.trim() || null,
-      urls: form.urls.filter((u) => u.url.trim()).map((u) => ({ label: u.label.trim(), url: u.url.trim() })),
-      deadline: form.deadline || null,
-      status: form.status,
-      referralContact: form.referralContact.trim() || null,
-      foundDate: form.foundDate || null,
-      followUpDate: form.followUpDate || null,
-      nextAction: form.nextAction.trim() || null,
-      notes: form.notes.trim() || null,
-    };
+    const payload = toPayload(form);
+    const changes = isEdit ? changedFields(payload, toPayload(initial)) : payload;
+    if (isEdit && Object.keys(changes).length === 0) { onClose(); return; }
 
     startTransition(async () => {
-      const res = isEdit ? await updateOpportunity(editing.id, payload) : await createOpportunity(payload);
+      const res = isEdit ? await updateOpportunity(editing.id, changes) : await createOpportunity(payload);
       if (!res.ok) {
         toast.push({ message: `Couldn't save: ${res.error}`, tone: "danger" });
         return;
       }
-      toast.push({ message: isEdit ? `Saved ${payload.name}` : `Added ${payload.name}` });
+      if (onSaved) onSaved(payload, isEdit);
+      else toast.push({ message: isEdit ? `Saved ${payload.name}` : `Added ${payload.name}` });
       onClose();
     });
   }
@@ -142,7 +206,7 @@ export function AddEditPanel({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={(e) => { if (e.target === e.currentTarget) requestClose(); }}
     >
       <form
         ref={dialogRef}
@@ -161,7 +225,7 @@ export function AddEditPanel({
           </h2>
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
             className="flex h-7 w-7 items-center justify-center rounded border-2 border-border bg-surface font-bold text-ink-muted hover:bg-surface-2 hover:text-ink"
             aria-label="Close"
           >
@@ -170,7 +234,7 @@ export function AddEditPanel({
         </div>
 
         {/* ── Shared fields ── */}
-        <Section title="Opportunity" hint="Shared with everyone on Runway">
+        <Section title="Opportunity" hint="Private to you">
           <div className="flex gap-2">
             {(["job", "hackathon"] as const).map((t) => (
               <button
@@ -211,7 +275,7 @@ export function AddEditPanel({
                 {["LinkedIn", "Unstop", "Devfolio", "Naukri", "Referral", "Cold email", "Other"].map((s) => <option key={s} value={s} />)}
               </datalist>
             </Field>
-            <Field label={form.type === "job" ? "Deadline" : "Event date"}>
+            <Field label={DEADLINE_LABEL[form.type]}>
               <input type="date" value={form.deadline} onChange={(e) => field("deadline", e.target.value)} className={inputCls} />
             </Field>
           </div>
@@ -268,7 +332,7 @@ export function AddEditPanel({
         </Section>
 
         {/* ── Personal fields ── */}
-        <Section title="Your tracking" hint="Only you see these">
+        <Section title="Your tracking" hint="Where you are with it">
           <div className="grid grid-cols-2 gap-3">
             <Field label="Status">
               <select
@@ -297,6 +361,18 @@ export function AddEditPanel({
             </Field>
             <Field label="Follow-up date">
               <input type="date" value={form.followUpDate} onChange={(e) => field("followUpDate", e.target.value)} className={inputCls} />
+              <div className="flex gap-1">
+                {FOLLOW_UP_PRESETS.map((p) => (
+                  <button
+                    key={p.label}
+                    type="button"
+                    onClick={() => field("followUpDate", isoInDays(p.days))}
+                    className="rounded border-2 border-border bg-surface px-1.5 py-0.5 text-2xs font-bold text-ink-muted hover:bg-surface-2 hover:text-ink"
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
             </Field>
           </div>
 
@@ -333,7 +409,7 @@ export function AddEditPanel({
             <span className="hidden text-2xs text-ink-faint sm:inline">⌘/Ctrl + Enter</span>
             <button
               type="button"
-              onClick={onClose}
+              onClick={requestClose}
               className="rounded border-2 border-border bg-surface px-4 py-2 text-sm font-bold text-ink-muted shadow-hard-1 btn-push-sm hover:text-ink"
             >
               Cancel

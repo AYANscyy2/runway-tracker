@@ -93,3 +93,13 @@ test("does not mistake real posting text for boilerplate", () => {
   const content = chunkJobDescription(text).map((c) => c.content).join("\n");
   assert.match(content, /search logs and save time/);
 });
+
+test("a long page keeps its opening and the fact paragraphs past the cut", async () => {
+  const { prepareText } = await import("../src/lib/inbox/extract");
+  const filler = Array.from({ length: 400 }, (_, i) => `Clause ${i}: legal text about conduct and warranties.`).join("\n\n");
+  const text = `Build Hackathon 2026\n\n${filler}\n\n8. Prizes\n\n1st Place: $25,000 cash`;
+  const out = prepareText(text);
+  assert.ok(out.length <= 24_000);
+  assert.ok(out.startsWith("Build Hackathon 2026"));
+  assert.match(out, /\$25,000 cash/);
+});

@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, date, pgEnum, integer, boolean, jsonb, unique, vector, index } from "drizzle-orm/pg-core";
+import { type AnyPgColumn, pgTable, serial, text, timestamp, date, pgEnum, integer, boolean, jsonb, unique, vector, index } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
 	id: text("id").primaryKey(),
@@ -86,10 +86,13 @@ export const opportunities = pgTable("opportunities", {
   compMax: integer("comp_max"),
   location: text("location"),
   remote: remoteMode("remote"),
+  compCurrency: text("comp_currency"),
   // Owner. Opportunities are private — every read and mutation is scoped to
   // this. Nullable only because rows predating the column exist; backfill
   // them and treat null as "belongs to nobody".
   createdBy: text("created_by").references(() => user.id),
+  // Set by Delete; cleared by Undo. Rows past the undo window are purged.
+  deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -113,6 +116,9 @@ export const userOpportunityTracking = pgTable("user_opportunity_tracking", {
   referralContact: text("referral_contact"),
   nextAction: text("next_action"),
   notes: text("notes"),
+  // When `status` last changed. Drives "hasn't moved in N days" — editing a
+  // note or fixing a link is not progress, so updatedAt can't be used.
+  statusChangedAt: timestamp("status_changed_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
@@ -144,7 +150,7 @@ export type OpportunityWithUrls = Opportunity & {
   nextAction: string | null;
   notes: string | null;
   trackingId: number | null;
-  /** When the tracking row last changed (status, notes…), not the opportunity itself. Drives staleness. */
+  /** When the status last changed. Drives staleness. */
   trackedAt: Date | null;
   urls: OpportunityUrl[];
 };
@@ -179,6 +185,12 @@ export const jobPostings = pgTable("job_postings", {
   dismissedReason: text("dismissed_reason"),
   promotedOpportunityId: integer("promoted_opportunity_id")
     .references(() => opportunities.id, { onDelete: "set null" }),
+  // The fetched page's <title>. Kept so a re-extraction sees the same hint —
+  // a hackathon's name is often only in the title.
+  pageTitle: text("page_title"),
+  // Set when another posting in this inbox looks like the same thing (same
+  // URL, or same company and role). Advisory: the card offers a dismiss.
+  duplicateOfId: integer("duplicate_of_id").references((): AnyPgColumn => jobPostings.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
@@ -190,11 +202,14 @@ export type NewJobPosting = typeof jobPostings.$inferInsert;
 
 /** What the model (or a hand-filled form) pulled out of a posting, plus the
  * provenance needed to debug a bad extraction later. One row per posting. */
+export const postingKind = pgEnum("posting_kind", ["job", "hackathon"]);
+
 export const jobExtractions = pgTable("job_extractions", {
   id: serial("id").primaryKey(),
   postingId: integer("posting_id")
     .references(() => jobPostings.id, { onDelete: "cascade" })
     .notNull(),
+  kind: postingKind("kind").notNull().default("job"),
   role: text("role"),
   company: text("company"),
   stack: text("stack").array(),
@@ -205,6 +220,16 @@ export const jobExtractions = pgTable("job_extractions", {
   remote: remoteMode("remote").notNull().default("unclear"),
   deadline: date("deadline"),
   seniority: text("seniority"),
+  // Hackathon-only. For a hackathon, `company` is the organiser, `deadline`
+  // the submission deadline and `remote` the format (remote = online).
+  eventName: text("event_name"),
+  prizeAmount: integer("prize_amount"),
+  prizeCurrency: text("prize_currency"),
+  startsOn: date("starts_on"),
+  endsOn: date("ends_on"),
+  teamSizeMax: integer("team_size_max"),
+  eligibility: text("eligibility"),
+  themes: text("themes").array(),
   // Provenance. `model` is "manual" for hand-filled entries.
   model: text("model").notNull(),
   promptVersion: text("prompt_version").notNull(),
@@ -273,10 +298,22 @@ export type MatchBreakdown = {
 export type MatchScore = typeof matchScores.$inferSelect;
 export type NewMatchScore = typeof matchScores.$inferInsert;
 
+/**
+ * The score a card shows. Every dimension except fit is recomputed from the
+ * extraction and the current profile on each read, so "deadline passed" and
+ * profile edits are never stale; only fit comes from the stored row.
+ */
+export type CardScore = {
+  total: number;
+  breakdown: MatchBreakdown;
+  /** Fit has not been assessed for the current profile — shown as neutral. */
+  fitPending: boolean;
+};
+
 /** What the Inbox tab renders: a posting with its extraction and score. */
 export type InboxCard = JobPosting & {
   extraction: JobExtraction | null;
-  score: MatchScore | null;
+  score: CardScore | null;
 };
 
 /**

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { getProfile, saveProfile, type ProfileInput } from "@/app/inbox/actions";
 import type { UserProfile } from "@/db/schema";
 import { useToast } from "./Toast";
@@ -36,13 +36,24 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 export function ProfileForm() {
   const toast = useToast();
   const [form, setForm] = useState<ProfileInput | null>(null);
+  // List fields are edited as the raw text and split only on save: splitting
+  // on every keystroke and joining back with ", " added a space per keystroke.
+  const [stackText, setStackText] = useState("");
+  const [locationsText, setLocationsText] = useState("");
   const [isPending, startTransition] = useTransition();
+  const loaded = useRef(false);
 
   useEffect(() => {
+    // Load once. A rerun (e.g. a new toast function identity) would overwrite
+    // whatever has been typed since.
+    if (loaded.current) return;
+    loaded.current = true;
     void (async () => {
       const res = await getProfile();
       if (!res.ok) { toast.push({ message: res.error, tone: "danger" }); setForm(empty); return; }
       const p = res.data;
+      setStackText((p?.stack ?? []).join(", "));
+      setLocationsText((p?.preferredLocations ?? []).join(", "));
       setForm(p ? {
         stack: p.stack ?? [],
         targetCompMin: p.targetCompMin,
@@ -62,10 +73,11 @@ export function ProfileForm() {
 
   function save() {
     startTransition(async () => {
-      const res = await saveProfile(form!);
+      const split = (t: string) => t.split(",").map((x) => x.trim()).filter(Boolean);
+      const res = await saveProfile({ ...form!, stack: split(stackText), preferredLocations: split(locationsText) });
       if (!res.ok) { toast.push({ message: res.error, tone: "danger" }); return; }
       toast.push({
-        message: res.data > 0 ? `Saved — rescored ${res.data} posting${res.data > 1 ? "s" : ""}` : "Saved",
+        message: res.data > 0 ? `Saved — reassessed fit for ${res.data} posting${res.data > 1 ? "s" : ""}` : "Saved",
       });
     });
   }
@@ -79,8 +91,8 @@ export function ProfileForm() {
       <Field label="Your stack" hint="Comma separated. Used for the overlap score.">
         <input
           className={inputCls}
-          value={form.stack.join(", ")}
-          onChange={(e) => set({ stack: e.target.value.split(",") })}
+          value={stackText}
+          onChange={(e) => setStackText(e.target.value)}
           placeholder="typescript, react, node.js, postgresql"
         />
       </Field>
@@ -115,8 +127,8 @@ export function ProfileForm() {
         <Field label="Preferred locations" hint="Comma separated.">
           <input
             className={inputCls}
-            value={form.preferredLocations.join(", ")}
-            onChange={(e) => set({ preferredLocations: e.target.value.split(",") })}
+            value={locationsText}
+            onChange={(e) => setLocationsText(e.target.value)}
             placeholder="Bengaluru, Hyderabad"
           />
         </Field>

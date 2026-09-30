@@ -1,7 +1,8 @@
 import { google } from "@ai-sdk/google";
 import { generateObject, NoObjectGeneratedError } from "ai";
 import { PROMPT_VERSION, SYSTEM_PROMPT, extractionSchema, type Extraction } from "./schema";
-import { checkExtraction, type Violation } from "./validate";
+import { checkExtraction, normalizeExtraction, type Violation } from "./validate";
+import { isBoilerplate } from "./chunk";
 
 // Overridable so the model can be bumped without a deploy-time code change.
 // Flash-lite by default: the free tier allows far more requests a day than
@@ -51,11 +52,52 @@ export type ExtractionResult = {
   rawResponse: unknown;
 };
 
-function userPrompt(rawText: string, retryFor: Violation | null): string {
-  const jd = rawText.slice(0, MAX_INPUT_CHARS);
-  if (!retryFor) return `Job description:\n\n${jd}`;
+/** What the page itself says about where it came from — often the only place
+ * a hackathon's name appears. */
+export type ExtractionHints = { sourceUrl?: string | null; pageTitle?: string | null };
+
+/** Paragraphs worth keeping from past the cut: the facts a card is built
+ * from tend to sit in a prizes table or a dates section near the end. */
+const KEY_FACTS = /(prize|award|cash|\$\s?\d|₹\s?\d|€\s?\d|£\s?\d|\b(lpa|ctc|salary|stipend|compensation)\b|deadline|submission period|submissions? (open|close|due)|apply by|last date|eligib|team size|teams? of up to|remote|online|virtual|in[- ]person|location)/i;
+
+/**
+ * Strip site chrome, then fit the text to the model's budget. A long page
+ * keeps its opening (title, company, the gist) and then the paragraphs from
+ * the rest that state concrete facts — cutting a 45 KB rules page at 24 KB
+ * from the top loses the prize table entirely.
+ */
+export function prepareText(rawText: string): string {
+  const clean = rawText
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => !isBoilerplate(l))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
+  if (clean.length <= MAX_INPUT_CHARS) return clean;
+
+  const HEAD = Math.floor(MAX_INPUT_CHARS * 0.6);
+  const head = clean.slice(0, HEAD);
+  const out = [head, "\n\n[…later excerpts…]\n"];
+  let used = head.length + 24;
+  for (const para of clean.slice(HEAD).split(/\n{2,}/)) {
+    if (!KEY_FACTS.test(para)) continue;
+    const piece = para.length > 600 ? `${para.slice(0, 600)}…` : para;
+    if (used + piece.length + 2 > MAX_INPUT_CHARS) break;
+    out.push(piece);
+    used += piece.length + 2;
+  }
+  return out.join("\n");
+}
+
+function userPrompt(rawText: string, retryFor: Violation | null, hints: ExtractionHints): string {
+  const header = [
+    hints.pageTitle && `Page title: ${hints.pageTitle}`,
+    hints.sourceUrl && `Source URL: ${hints.sourceUrl}`,
+  ].filter(Boolean).join("\n");
+  const body = `${header ? `${header}\n\n` : ""}Posting text:\n\n${prepareText(rawText)}`;
+  if (!retryFor) return body;
   return [
-    `Job description:\n\n${jd}`,
+    body,
     ``,
     `Your previous answer was rejected: ${retryFor.message}`,
     `Re-read the posting and correct that field. Leave the others as they were unless they were wrong too.`,
@@ -78,7 +120,7 @@ function logCost(model: string, inputTokens: number | null, outputTokens: number
  * second failure is kept rather than discarded: a flagged imperfect extraction
  * is more useful than none, and `retriedRule` records what went wrong.
  */
-export async function extractJobDescription(rawText: string): Promise<ExtractionResult> {
+export async function extractJobDescription(rawText: string, hints: ExtractionHints = {}): Promise<ExtractionResult> {
   let violation: Violation | null = null;
   let last: { extraction: Extraction; usage: { inputTokens?: number; outputTokens?: number }; raw: unknown } | null = null;
 
@@ -89,7 +131,7 @@ export async function extractJobDescription(rawText: string): Promise<Extraction
         model: google(MODEL_ID),
         schema: extractionSchema,
         system: SYSTEM_PROMPT,
-        prompt: userPrompt(rawText, violation),
+        prompt: userPrompt(rawText, violation, hints),
         temperature: 0,
         // Our own retry loop handles a bad response; the SDK's default retry
         // just spends quota failing the same way three times.
@@ -108,13 +150,14 @@ export async function extractJobDescription(rawText: string): Promise<Extraction
       throw e;
     }
 
-    last = { extraction: result.object, usage: result.usage, raw: result.object };
-    const found = checkExtraction(result.object, rawText);
+    const extraction = normalizeExtraction(result.object);
+    last = { extraction, usage: result.usage, raw: result.object };
+    const found = checkExtraction(extraction, rawText, hints.sourceUrl);
 
     if (!found) {
       logCost(MODEL_ID, result.usage.inputTokens ?? null, result.usage.outputTokens ?? null, attempt);
       return {
-        extraction: result.object,
+        extraction,
         model: MODEL_ID,
         promptVersion: PROMPT_VERSION,
         attemptCount: attempt,

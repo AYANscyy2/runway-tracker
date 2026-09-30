@@ -17,9 +17,15 @@ function optText(v: unknown, field: string): string | null {
   return t || null;
 }
 
+/** Date.parse accepts "2026-02-31" by rolling it into March, so round-trip it. */
+function isRealDate(iso: string): boolean {
+  const t = Date.parse(`${iso}T00:00:00Z`);
+  return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === iso;
+}
+
 function optDate(v: unknown, field: string): string | null {
   if (v === null || v === undefined || v === "") return null;
-  if (typeof v !== "string" || !ISO_DATE.test(v) || Number.isNaN(Date.parse(v))) fail(`${field} must be a YYYY-MM-DD date.`);
+  if (typeof v !== "string" || !ISO_DATE.test(v) || !isRealDate(v)) fail(`${field} must be a real YYYY-MM-DD date.`);
   return v;
 }
 

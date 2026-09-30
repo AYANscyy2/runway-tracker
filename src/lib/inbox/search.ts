@@ -30,15 +30,22 @@ type Ranked = { postingId: number; snippet: string; section: string };
  * websearch_to_tsquery handles quoted phrases and `-exclusions` the way a
  * search box user expects. */
 async function keywordSearch(userId: string, query: string): Promise<Ranked[]> {
+  // DISTINCT ON needs posting_id first in its ORDER BY, which is the wrong
+  // order for ranking — so it only picks each posting's best chunk, and the
+  // outer query ranks those. Without the outer ORDER BY, fusion would see the
+  // results in posting-id order and LIMIT would keep the oldest postings.
   const rows = await db.execute<{ posting_id: number; content: string; section: string }>(sql`
-    SELECT DISTINCT ON (c.posting_id)
-           c.posting_id, c.content, c.section,
-           ts_rank(c.search, websearch_to_tsquery('english', ${query})) AS rank
-    FROM ${jobChunks} c
-    JOIN ${jobPostings} p ON p.id = c.posting_id
-    WHERE p.user_id = ${userId}
-      AND c.search @@ websearch_to_tsquery('english', ${query})
-    ORDER BY c.posting_id, rank DESC
+    SELECT posting_id, content, section FROM (
+      SELECT DISTINCT ON (c.posting_id)
+             c.posting_id, c.content, c.section,
+             ts_rank(c.search, websearch_to_tsquery('english', ${query})) AS rank
+      FROM ${jobChunks} c
+      JOIN ${jobPostings} p ON p.id = c.posting_id
+      WHERE p.user_id = ${userId}
+        AND c.search @@ websearch_to_tsquery('english', ${query})
+      ORDER BY c.posting_id, rank DESC
+    ) best
+    ORDER BY rank DESC
     LIMIT ${CANDIDATES}
   `);
   return rows.rows.map((r) => ({ postingId: r.posting_id, snippet: r.content, section: r.section }));
@@ -50,15 +57,18 @@ async function semanticSearch(userId: string, query: string): Promise<Ranked[]> 
   const embedding = await embedQuery(query);
   const literal = `[${embedding.join(",")}]`;
   const rows = await db.execute<{ posting_id: number; content: string; section: string }>(sql`
-    SELECT DISTINCT ON (c.posting_id)
-           c.posting_id, c.content, c.section,
-           c.embedding <=> ${literal}::vector AS distance
-    FROM ${jobChunks} c
-    JOIN ${jobPostings} p ON p.id = c.posting_id
-    WHERE p.user_id = ${userId}
-      AND c.embedding IS NOT NULL
-      AND c.embedding <=> ${literal}::vector < ${MAX_SEMANTIC_DISTANCE}
-    ORDER BY c.posting_id, distance ASC
+    SELECT posting_id, content, section FROM (
+      SELECT DISTINCT ON (c.posting_id)
+             c.posting_id, c.content, c.section,
+             c.embedding <=> ${literal}::vector AS distance
+      FROM ${jobChunks} c
+      JOIN ${jobPostings} p ON p.id = c.posting_id
+      WHERE p.user_id = ${userId}
+        AND c.embedding IS NOT NULL
+        AND c.embedding <=> ${literal}::vector < ${MAX_SEMANTIC_DISTANCE}
+      ORDER BY c.posting_id, distance ASC
+    ) best
+    ORDER BY distance ASC
     LIMIT ${CANDIDATES}
   `);
   return rows.rows.map((r) => ({ postingId: r.posting_id, snippet: r.content, section: r.section }));

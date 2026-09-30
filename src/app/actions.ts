@@ -1,10 +1,10 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { opportunities, opportunityUrls, userOpportunityTracking, type NewOpportunity } from "@/db/schema";
 import { auth } from "@/lib/auth";
-import type { Status } from "@/lib/constants";
+import { STATUS_FOR_TYPE, type Status } from "@/lib/constants";
 import { validateOpportunityInput } from "@/lib/validate";
 import { run, type ActionResult } from "@/lib/action-result";
 import { headers } from "next/headers";
@@ -27,12 +27,21 @@ export type OpportunityInput = {
 };
 
 
-/** Opportunities are private; a row you don't own is indistinguishable from one that doesn't exist. */
-async function requireOwned(id: number, userId: string) {
+/** How long a deleted entry stays restorable before it is purged for good.
+ * Comfortably longer than the Undo toast, so a slow click still works. */
+const PURGE_AFTER_MS = 24 * 60 * 60 * 1000;
+
+/** Opportunities are private; a row you don't own is indistinguishable from
+ * one that doesn't exist — and so is one you deleted. */
+async function requireOwned(id: number, userId: string, { deleted = false } = {}) {
   const [opp] = await db
     .select()
     .from(opportunities)
-    .where(and(eq(opportunities.id, id), eq(opportunities.createdBy, userId)));
+    .where(and(
+      eq(opportunities.id, id),
+      eq(opportunities.createdBy, userId),
+      deleted ? isNotNull(opportunities.deletedAt) : isNull(opportunities.deletedAt),
+    ));
   if (!opp) throw new Error("Not found");
   return opp;
 }
@@ -92,8 +101,24 @@ export async function updateOpportunity(id: number, input: Partial<OpportunityIn
     if (sharedData.source !== undefined) sharedUpdates.source = sharedData.source;
     if (sharedData.deadline !== undefined) sharedUpdates.deadline = sharedData.deadline;
 
+    const [current] = await db
+      .select({ status: userOpportunityTracking.status })
+      .from(userOpportunityTracking)
+      .where(and(eq(userOpportunityTracking.userId, session.user.id), eq(userOpportunityTracking.opportunityId, id)));
+
+    // A type change that leaves the current status impossible (a hackathon in
+    // "OA / Assignment") must come with a new status.
+    if (sharedData.type !== undefined && status === undefined && current
+      && !STATUS_FOR_TYPE[sharedData.type].includes(current.status)) {
+      throw new Error(`Pick a status that exists for a ${sharedData.type}.`);
+    }
+
     const trackingUpdates: Partial<typeof userOpportunityTracking.$inferInsert> = {};
-    if (status !== undefined) trackingUpdates.status = status;
+    if (status !== undefined && status !== current?.status) {
+      trackingUpdates.status = status;
+      // Only a real status change restarts the "hasn't moved" clock.
+      trackingUpdates.statusChangedAt = new Date();
+    }
     if (referralContact !== undefined) trackingUpdates.referralContact = referralContact;
     if (foundDate !== undefined) trackingUpdates.foundDate = foundDate;
     if (followUpDate !== undefined) trackingUpdates.followUpDate = followUpDate;
@@ -140,12 +165,36 @@ export async function updateOpportunity(id: number, input: Partial<OpportunityIn
   }, { revalidate: "/" });
 }
 
+/**
+ * Delete, saved immediately. It is a soft delete so the Undo toast can bring
+ * the entry back; waiting out the toast before deleting meant a reload inside
+ * those seconds silently kept it. Entries past the undo window are purged
+ * here, which is also when an Inbox posting promoted into one reopens for good.
+ */
 export async function deleteOpportunity(id: number): Promise<ActionResult> {
   return run(async () => {
     const session = await requireSession();
 
     await requireOwned(id, session.user.id);
 
-    await db.delete(opportunities).where(eq(opportunities.id, id));
+    await db.update(opportunities).set({ deletedAt: new Date() }).where(eq(opportunities.id, id));
+
+    await db
+      .delete(opportunities)
+      .where(and(
+        eq(opportunities.createdBy, session.user.id),
+        lt(opportunities.deletedAt, new Date(Date.now() - PURGE_AFTER_MS)),
+      ));
+  }, { revalidate: "/" });
+}
+
+/** Undo a delete. */
+export async function restoreOpportunity(id: number): Promise<ActionResult> {
+  return run(async () => {
+    const session = await requireSession();
+
+    await requireOwned(id, session.user.id, { deleted: true });
+
+    await db.update(opportunities).set({ deletedAt: null }).where(eq(opportunities.id, id));
   }, { revalidate: "/" });
 }

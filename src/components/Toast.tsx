@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 
 type Toast = {
   id: number;
@@ -43,8 +43,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     return id;
   }, [dismiss]);
 
+  // Memoised so consumers don't see a new `toast` on every toast change —
+  // effects keyed on it (the Inbox's fetch, the profile form's load) would
+  // otherwise rerun each time a toast appeared or went away.
+  const value = useMemo(() => ({ push, dismiss }), [push, dismiss]);
+
   return (
-    <ToastContext.Provider value={{ push, dismiss }}>
+    <ToastContext.Provider value={value}>
       {children}
       <div
         aria-live="polite"

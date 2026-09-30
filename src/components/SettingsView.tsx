@@ -4,6 +4,24 @@ import { useSession, signOut } from "@/lib/auth-client";
 import { ProfileForm } from "./ProfileForm";
 import Image from "next/image";
 
+const SHORTCUTS: [string[], string][] = [
+  [["n"], "Log a new opportunity"],
+  [["/"], "Search the tracker"],
+  [["1", "…", "6"], "Switch tabs (Tracker, Inbox, Calendar, Agenda, Statistics, Settings)"],
+  [["Enter"], "Expand the focused tracker row"],
+  [["e"], "Edit the focused tracker row"],
+  [["Esc"], "Clear the search, or close a dialog"],
+  [["⌘/Ctrl", "Enter"], "Save the open form"],
+];
+
+function Key({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="rounded border-2 border-border bg-surface px-1.5 py-0.5 font-mono text-xs font-bold text-ink shadow-hard-1">
+      {children}
+    </kbd>
+  );
+}
+
 export function SettingsView({
   theme,
   setTheme,
@@ -55,6 +73,21 @@ export function SettingsView({
         <section className="rounded border-2 border-border bg-bg-card p-6 shadow-hard-1">
           <h3 className="mb-4 text-lg font-bold text-ink">Match profile</h3>
           <ProfileForm />
+        </section>
+
+        {/* Keyboard shortcuts */}
+        <section className="rounded border-2 border-border bg-bg-card p-6 shadow-hard-1">
+          <h3 className="mb-4 text-lg font-bold text-ink">Keyboard shortcuts</h3>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+            {SHORTCUTS.map(([keys, what]) => (
+              <div key={what} className="contents">
+                <dt className="flex gap-1">
+                  {keys.map((k) => <Key key={k}>{k}</Key>)}
+                </dt>
+                <dd className="text-ink-muted">{what}</dd>
+              </div>
+            ))}
+          </dl>
         </section>
 
         {/* Account Section */}

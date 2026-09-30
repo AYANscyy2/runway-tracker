@@ -9,6 +9,7 @@ import { updateOpportunity } from "@/app/actions";
 import { daysUntil, formatDeadline, urgencyFor } from "@/lib/dates";
 import { useToast } from "./Toast";
 import { IconChevron } from "./Icons";
+import { compBand, remoteLabel } from "@/lib/inbox/format";
 
 // Avatar color list — chosen by charCode of first letter
 const AVATAR_COLORS = [
@@ -28,7 +29,7 @@ function CompanyAvatar({ name }: { name: string }) {
   );
 }
 
-type SortKey = "deadline" | "name" | "status" | "followUp";
+type SortKey = "deadline" | "name" | "status";
 type Sort = { key: SortKey; dir: 1 | -1 };
 
 const COLUMNS: { key: SortKey | null; label: string; className?: string }[] = [
@@ -49,17 +50,9 @@ function deadlineRank(i: OpportunityWithUrls): [number, number] {
 }
 
 function compare(a: OpportunityWithUrls, b: OpportunityWithUrls, { key, dir }: Sort) {
-  const byDate = (x: string | null, y: string | null) => {
-    const dx = daysUntil(x), dy = daysUntil(y);
-    if (dx === null && dy === null) return 0;
-    if (dx === null) return 1;   // empty dates sink regardless of direction
-    if (dy === null) return -1;
-    return (dx - dy) * dir;
-  };
   switch (key) {
     case "name":     return a.name.localeCompare(b.name) * dir;
     case "status":   return (STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status)) * dir;
-    case "followUp": return byDate(a.followUpDate, b.followUpDate);
     default: {
       const [ga, da] = deadlineRank(a), [gb, db] = deadlineRank(b);
       return ga !== gb ? (ga - gb) * dir : (da - db) * dir;
@@ -174,15 +167,27 @@ export function OpportunityTable({
               return (
                 <Fragment key={item.id}>
                   <tr
+                    tabIndex={0}
+                    aria-expanded={isOpen}
                     onClick={() => setExpanded(isOpen ? null : item.id)}
-                    className={`cursor-pointer border-b-2 border-l-4 border-border/20 bg-bg-card transition-opacity hover:bg-surface ${ROW_URGENCY[urgency]} ${isPending ? "opacity-50" : ""}`}
+                    onKeyDown={(e) => {
+                      // Only when the row itself has focus — not the select or
+                      // buttons inside it, which handle their own keys.
+                      if (e.target !== e.currentTarget) return;
+                      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(isOpen ? null : item.id); }
+                      if (e.key === "e") { e.preventDefault(); onEdit(item); }
+                    }}
+                    className={`cursor-pointer focus:outline-none focus-visible:bg-surface focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary border-b-2 border-l-4 border-border/20 bg-bg-card transition-opacity hover:bg-surface ${ROW_URGENCY[urgency]} ${isPending ? "opacity-50" : ""}`}
                   >
                     <td className="px-4 py-3 align-middle">
                       <div className="flex items-center gap-2.5">
                         <IconChevron open={isOpen} className="shrink-0 text-xs text-ink-faint" />
                         <CompanyAvatar name={item.name} />
                         <div className="min-w-0">
-                          <p className="truncate font-bold text-ink">{item.name}</p>
+                          <p className="truncate font-bold text-ink">
+                            {item.name}
+                            {item.role && <span className="font-medium text-ink-muted"> · {item.role}</span>}
+                          </p>
                           <p className="text-2xs text-ink-muted">
                             {TYPE_LABEL[item.type]}{item.source ? ` · ${item.source}` : ""}
                           </p>
@@ -223,6 +228,7 @@ export function OpportunityTable({
       <ul className="flex flex-col gap-3 md:hidden">
         {sorted.map((item) => {
           const isPending = pendingIds.has(item.id);
+          const isOpen = expanded === item.id;
           const urgency = urgencyFor(item.deadline, !deadlineMatters(item.type, item.status));
           return (
             <li
@@ -233,7 +239,10 @@ export function OpportunityTable({
                 <div className="flex min-w-0 items-center gap-2.5">
                   <CompanyAvatar name={item.name} />
                   <div className="min-w-0">
-                    <p className="truncate font-bold text-ink">{item.name}</p>
+                    <p className="truncate font-bold text-ink">
+                            {item.name}
+                            {item.role && <span className="font-medium text-ink-muted"> · {item.role}</span>}
+                          </p>
                     <p className="text-2xs text-ink-muted">
                       {TYPE_LABEL[item.type]}{item.source ? ` · ${item.source}` : ""}
                     </p>
@@ -249,6 +258,22 @@ export function OpportunityTable({
                 <p className="mt-2 text-xs text-ink-muted"><span className="font-bold text-ink">Next:</span> {item.nextAction}</p>
               )}
               {item.urls.length > 0 && <div className="mt-2"><LinksCell urls={item.urls} /></div>}
+              {/* The desktop row expands to show these; a phone had no way to
+                  see notes, referral or follow-up without opening the editor. */}
+              <button
+                type="button"
+                onClick={() => setExpanded(isOpen ? null : item.id)}
+                aria-expanded={isOpen}
+                className="mt-2 inline-flex items-center gap-1 text-2xs font-bold uppercase tracking-wider text-ink-muted hover:text-ink"
+              >
+                <IconChevron open={isOpen} className="text-xs" />
+                {isOpen ? "Less" : "Details"}
+              </button>
+              {isOpen && (
+                <div className="mt-2 border-t-2 border-border/20 pt-2">
+                  <Details item={item} />
+                </div>
+              )}
             </li>
           );
         })}
@@ -258,7 +283,18 @@ export function OpportunityTable({
 }
 
 function Details({ item }: { item: OpportunityWithUrls }) {
+  // Filled in when the entry came from the Inbox; hand-logged ones leave them
+  // empty, so only what's there is shown.
+  const pay = compBand({ compMin: item.compMin, compMax: item.compMax, compCurrency: item.compCurrency });
+  const promoted: [string, React.ReactNode][] = [];
+  if (item.role) promoted.push(["Role", item.role]);
+  if (pay) promoted.push(["Pay", pay]);
+  if (item.location || (item.remote && item.remote !== "unclear")) {
+    promoted.push([item.type === "hackathon" ? "Where" : "Location", [item.location, item.remote && item.remote !== "unclear" ? remoteLabel(item.remote, item.type) : null].filter(Boolean).join(" · ")]);
+  }
+  if (item.stack && item.stack.length > 0) promoted.push(["Stack", item.stack.join(", ")]);
   const rows: [string, React.ReactNode][] = [
+    ...promoted,
     ["Referral", item.referralContact || "—"],
     ["Found", formatDeadline(item.foundDate)],
     ["Follow-up", formatDeadline(item.followUpDate)],

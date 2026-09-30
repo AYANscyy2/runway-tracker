@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fitKeyFor, scoreMatch, MAX_TOTAL } from "../src/lib/inbox/rubric";
+import { fitKeyFor, normalise, scoreCard, scoreMatch, MAX_TOTAL } from "../src/lib/inbox/rubric";
+import { DIMENSION_ORDER, WEIGHTS } from "../src/lib/inbox/dimensions";
 import type { JobExtraction, MatchBreakdown, UserProfile } from "../src/db/schema";
 
 // The fit dimension is the only part that calls a model. Every test here
@@ -103,4 +104,93 @@ test("stack aliases match: profile 'postgres' vs posting 'postgresql'", async ()
 test("the total never exceeds the advertised maximum", async () => {
   const r = await score(extraction({ compMin: 9_000_000, compMax: 9_000_000, remote: "remote" }), profile());
   assert.ok(r.total <= MAX_TOTAL, `${r.total} > ${MAX_TOTAL}`);
+});
+
+const hackathon = (over: Partial<JobExtraction> = {}) => extraction({
+  kind: "hackathon", role: null, seniority: null, compMin: null, compMax: null, compCurrency: null,
+  eventName: "Appstore Dev Hackathon", company: "Amazon", remote: "remote", location: null,
+  prizeAmount: null, prizeCurrency: null, startsOn: null, endsOn: null, teamSizeMax: null,
+  eligibility: null, themes: [], deadline: "2099-01-01",
+  stack: ["react native", "kotlin", "java", "aws", "amazon bedrock", "sagemaker"],
+  ...over,
+});
+
+test("weights for each kind add up to the advertised maximum", () => {
+  for (const w of Object.values(WEIGHTS)) {
+    assert.equal(Object.values(w).reduce((a, b) => a + b, 0), MAX_TOTAL);
+  }
+});
+
+test("a hackathon's long tool list doesn't zero the stack score", async () => {
+  const two = await score(hackathon(), profile({ stack: ["aws", "java", "typescript"] }));
+  assert.equal(two.breakdown.stack.score, two.breakdown.stack.max);
+
+  const one = await score(hackathon(), profile({ stack: ["aws"] }));
+  assert.ok(one.breakdown.stack.score > one.breakdown.stack.max / 2);
+
+  const none = await score(hackathon(), profile({ stack: ["typescript"] }));
+  assert.ok(none.breakdown.stack.score > 0, "knowing none of the tools is not disqualifying");
+  assert.ok(none.breakdown.stack.score < one.breakdown.stack.score);
+});
+
+test("a hackathon is scored on prize, format and submission timing", async () => {
+  const r = await score(hackathon({ prizeAmount: 20_000, prizeCurrency: "USD" }), profile());
+  assert.equal(r.breakdown.comp.score, r.breakdown.comp.max);
+  assert.match(r.breakdown.comp.reason, /prizes/);
+  assert.match(r.breakdown.location.reason, /Online/);
+  assert.match(r.breakdown.startDate.reason, /left to submit/);
+  assert.doesNotMatch(r.breakdown.comp.reason, /compensation/);
+});
+
+test("a closed hackathon scores zero on timing", async () => {
+  const r = await score(hackathon({ deadline: "2020-01-01" }), profile());
+  assert.equal(r.breakdown.startDate.score, 0);
+});
+
+test("the breakdown has exactly the displayed dimensions and each has a label-able shape", async () => {
+  const r = await score(extraction(), profile());
+  for (const k of DIMENSION_ORDER) {
+    assert.equal(typeof r.breakdown[k].score, "number");
+    assert.equal(typeof r.breakdown[k].max, "number");
+  }
+  assert.equal(DIMENSION_ORDER.reduce((s, k) => s + r.breakdown[k].score, 0), r.total);
+});
+
+test("a card with no stored fit still gets a score, marked pending", () => {
+  const c = scoreCard(extraction(), profile(), null);
+  assert.equal(c.fitPending, true);
+  assert.equal(c.breakdown.fit.score, c.breakdown.fit.max / 2);
+  assert.ok(c.total > 0);
+});
+
+test("a stored fit from an older profile is pending, not silently reused", () => {
+  const e = extraction(), p = profile();
+  const c = scoreCard(e, profile({ notes: "something else" }), { ...blank, fitKey: fitKeyFor(e, p) });
+  assert.equal(c.fitPending, true);
+  assert.match(c.breakdown.fit.reason, /profile changed/);
+});
+
+test("the timing dimension is computed on read, so a stored score can't go stale", () => {
+  const e = extraction({ deadline: "2020-01-01" }), p = profile();
+  const stored = { ...blank, startDate: { score: 5, max: 5, reason: "Open" }, fitKey: fitKeyFor(e, p) };
+  assert.equal(scoreCard(e, p, stored).breakdown.startDate.score, 0);
+});
+
+test("jobs keep their existing fit key, so stored fits survive the upgrade", () => {
+  // Pinned: changing this invalidates every stored fit and costs a model call each.
+  const e = extraction(), p = profile();
+  assert.equal(fitKeyFor(e, p), fitKeyFor({ ...e, kind: "job", eventName: "ignored", themes: ["x"] } as JobExtraction, p));
+});
+
+test("technology names normalise across spellings", () => {
+  assert.equal(normalise("React.js"), normalise("react"));
+  assert.equal(normalise("NodeJS"), normalise("node.js"));
+  assert.equal(normalise("GCP"), normalise("Google Cloud Platform"));
+  assert.equal(normalise("Tailwind CSS"), normalise("tailwindcss"));
+  assert.equal(normalise("js"), "javascript");
+});
+
+test("a stack reason says how many it left out", async () => {
+  const r = await score(extraction({ stack: ["a", "b", "c", "d", "e", "f"] }), profile());
+  assert.match(r.breakdown.stack.reason, /and 2 more/);
 });

@@ -7,6 +7,8 @@
  * error page and present whatever it hallucinates as an extraction.
  */
 
+import { isListingUrl, postingUrlFor } from "./url";
+
 const UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36";
 
@@ -58,8 +60,12 @@ function decodeEntities(s: string): string {
     .replace(/&([a-z]+);/gi, (m, n) => named[n.toLowerCase()] ?? m);
 }
 
-export async function fetchJobDescription(url: string): Promise<{ text: string; title: string | null }> {
+export async function fetchJobDescription(input: string): Promise<{ text: string; title: string | null; url: string }> {
+  const url = postingUrlFor(input);
   const site = hostOf(url);
+  if (isListingUrl(url)) {
+    throw new FetchBlockedError(site, "that link is a search page with many jobs, not one posting. Open the job itself and copy its link");
+  }
 
   let res: Response;
   try {
@@ -89,5 +95,5 @@ export async function fetchJobDescription(url: string): Promise<{ text: string; 
     throw new FetchBlockedError(site, "the page had no readable description (it probably renders with JavaScript)");
   }
 
-  return { text, title: title ? decodeEntities(title).trim() : null };
+  return { text, title: title ? decodeEntities(title).replace(/\s+/g, " ").trim() : null, url };
 }

@@ -35,7 +35,7 @@ const BOILERPLATE = [
   /^\d+ (applicants?|views?)$/i,
 ];
 
-function isBoilerplate(line: string): boolean {
+export function isBoilerplate(line: string): boolean {
   const t = line.trim();
   if (!t) return false;
   return BOILERPLATE.some((p) => p.test(t));
